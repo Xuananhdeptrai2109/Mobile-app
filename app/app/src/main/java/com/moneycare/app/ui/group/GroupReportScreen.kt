@@ -1,0 +1,164 @@
+package com.moneycare.app.ui.group
+
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.moneycare.app.ui.theme.LightGreen
+import com.moneycare.app.util.toVnd
+import com.moneycare.app.viewmodel.GroupReportViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupReportScreen(
+    groupId: String,
+    onBackClick: () -> Unit,
+    viewModel: GroupReportViewModel = viewModel()
+) {
+    val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    var pendingCsv by remember { mutableStateOf<ByteArray?>(null) }
+    val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        val bytes = pendingCsv
+        if (uri != null && bytes != null) {
+            runCatching {
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: error("Không thể mở tệp đã chọn")
+                output.use { it.write(bytes) }
+            }.onSuccess {
+                Toast.makeText(context, "Đã xuất báo cáo CSV", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(context, "Không thể lưu báo cáo", Toast.LENGTH_SHORT).show()
+            }
+        }
+        pendingCsv = null
+    }
+
+    LaunchedEffect(groupId) { viewModel.load(groupId) }
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let {
+            snackbar.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Báo cáo nhóm") },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        when {
+            state.isLoading && state.report == null -> Column(
+                Modifier.fillMaxSize().padding(padding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) { CircularProgressIndicator() }
+
+            state.report != null -> {
+                val report = state.report!!
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        Text(report.groupName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    }
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = LightGreen.copy(alpha = 0.45f))) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ReportLine("Tổng chi", report.totalExpense.toVnd())
+                                ReportLine("Đã thanh toán", report.settledAmount.toVnd())
+                                ReportLine("Còn phải thanh toán", report.outstandingAmount.toVnd())
+                                ReportLine("Khoản chi", report.expenseCount.toString())
+                                ReportLine("Nhiệm vụ", "${report.completedTaskCount}/${report.taskCount} hoàn thành")
+                            }
+                        }
+                    }
+                    item { Text("Theo thành viên", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    items(report.members, key = { it.memberId }) { member ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(member.fullName, fontWeight = FontWeight.Bold)
+                                ReportLine("Đã ứng", member.totalPaid.toVnd())
+                                ReportLine("Phần được chia", member.totalOwed.toVnd())
+                                ReportLine("Còn nợ", member.outstandingAmount.toVnd())
+                                ReportLine("Số dư ròng", member.netBalance.toVnd())
+                            }
+                        }
+                    }
+                    item {
+                        Button(
+                            onClick = {
+                                viewModel.export(groupId) { bytes ->
+                                    pendingCsv = bytes
+                                    createDocument.launch("bao-cao-nhom-${report.groupId}.csv")
+                                }
+                            },
+                            enabled = !state.isExporting,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (state.isExporting) CircularProgressIndicator(Modifier.padding(end = 8.dp))
+                            else Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                            Text("Xuất CSV")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.SemiBold)
+    }
+}
