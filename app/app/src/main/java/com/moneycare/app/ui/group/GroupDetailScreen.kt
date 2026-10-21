@@ -156,6 +156,17 @@ fun GroupDetailScreen(
                                     onAddExpense = { onNavigateToAddExpense(groupId) },
                                     onExpenseClick = { expense -> onNavigateToExpenseDetail(expense.id) }
                                 )
+                                GroupDetailTab.SETTLEMENT -> GroupSettlementContent(
+                                    group = group,
+                                    onSettleDebt = { fromId, toId ->
+                                        viewModel.settleDebtBetweenMembers(fromId, toId)
+                                    },
+                                    onSyncToWallet = { walletId, categoryId, amount ->
+                                        viewModel.syncTripToPersonalWallet(walletId, categoryId, amount) {
+                                            viewModel.showMessage("Đã đồng bộ chi phí vào ví cá nhân thành công!")
+                                        }
+                                    }
+                                )
                                 GroupDetailTab.TASKS -> GroupTaskContent(
                                     group = group,
                                     onToggleTask = viewModel::toggleTaskStatus,

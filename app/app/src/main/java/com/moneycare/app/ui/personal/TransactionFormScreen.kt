@@ -13,12 +13,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,6 +39,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +77,8 @@ fun TransactionFormScreen(
     var note by remember(transactionId) { mutableStateOf("") }
     var transactionTime by remember(transactionId) { mutableStateOf(Calendar.getInstance()) }
     var initialized by remember(transactionId) { mutableStateOf(false) }
+    var showCreateWalletDialog by remember { mutableStateOf(false) }
+    var newWalletName by remember { mutableStateOf("") }
 
     LaunchedEffect(transactionId) {
         viewModel.clearSelectedTransaction()
@@ -106,6 +113,59 @@ fun TransactionFormScreen(
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
+    }
+
+    if (showCreateWalletDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!state.isSaving) showCreateWalletDialog = false
+            },
+            title = { Text("Thêm ví mới") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Nhập tên ví (ví dụ: Ví MoMo, ZaloPay, Vietcombank...). Ví sẽ tự động xuất hiện trong Quản lý ví và được lưu để chọn cho các lần sau.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = newWalletName,
+                        onValueChange = { newWalletName = it.take(100) },
+                        label = { Text("Tên ví") },
+                        placeholder = { Text("Ví dụ: Ví MoMo") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = newWalletName.trim()
+                        if (trimmed.isNotEmpty()) {
+                            viewModel.createWalletAndSelect(
+                                name = trimmed,
+                                onSuccess = { created ->
+                                    walletId = created.walletId
+                                    showCreateWalletDialog = false
+                                }
+                            )
+                        }
+                    },
+                    enabled = newWalletName.trim().isNotEmpty() && !state.isSaving
+                ) {
+                    Text(if (state.isSaving) "Đang lưu..." else "Tạo và chọn ví")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showCreateWalletDialog = false },
+                    enabled = !state.isSaving
+                ) {
+                    Text("Hủy")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -158,12 +218,15 @@ fun TransactionFormScreen(
                     )
                 }
                 item {
-                    SelectionField(
+                    WalletSelectionField(
                         label = "Ví",
                         selectedText = state.wallets.firstOrNull { it.walletId == walletId }?.name.orEmpty(),
-                        items = state.wallets,
-                        itemText = { it.name },
-                        onSelected = { walletId = it.walletId }
+                        wallets = state.wallets,
+                        onWalletSelected = { walletId = it.walletId },
+                        onAddNewWalletClick = {
+                            newWalletName = ""
+                            showCreateWalletDialog = true
+                        }
                     )
                 }
                 item {
@@ -287,6 +350,83 @@ private fun <T> SelectionField(
                         }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalletSelectionField(
+    label: String,
+    selectedText: String,
+    wallets: List<WalletResponse>,
+    onWalletSelected: (WalletResponse) -> Unit,
+    onAddNewWalletClick: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column {
+        FieldLabel(label)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = selectedText,
+                onValueChange = {},
+                readOnly = true,
+                placeholder = { Text("Chọn $label") },
+                trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Box(modifier = Modifier.matchParentSize().clickable { expanded = true })
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                wallets.forEach { wallet ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    wallet.name,
+                                    fontWeight = if (wallet.isDefault) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (wallet.isDefault) {
+                                    Text(
+                                        "(Mặc định)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            onWalletSelected(wallet)
+                            expanded = false
+                        }
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text(
+                                "Ví khác... (Thêm ví mới)",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onAddNewWalletClick()
+                    }
+                )
             }
         }
     }

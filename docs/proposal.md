@@ -29,30 +29,31 @@
 
 | Must have (M3) | Nice to have | Out of scope |
 |----------------|--------------|--------------|
-| Manual Wallet & Category management | Multi-currency for trips | Linking real bank accounts |
-| Income/Expense logging | Export reports to PDF/Excel | In-app bank transfers |
+| Manual Wallet & Category management (hỗ trợ tạo nhanh "+ Ví khác..." ngay tại form & giao diện pastel) | Multi-currency for trips | Linking real bank accounts |
+| Income/Expense logging (phân loại danh mục, chọn ví, lọc thời gian) | Export reports to PDF/Excel | In-app bank transfers |
 | Saving goals with progress tracker | Push notifications for new bills | OCR Receipt Scanning |
-| Create Trip & Add members | | |
-| Log shared expenses (who paid for who) | | |
-| Debt simplification algorithm (Settlement)| | |
+| Create Trip/Group & Add members | | |
+| Log shared expenses (chia đều / chia theo số tiền cụ thể) | | |
+| Debt simplification algorithm (Settlement tab — thuật toán tham lam tối giản số lượt chuyển tiền) | | |
+| Sync group expense into personal wallet (đồng bộ chi phí nhóm vào ví cá nhân tự động) | | |
 
 ## 5. Users & Key Challenge
 
 - **Target users:** Travelers, flatmates, students on a budget. They use the app on the go, right after buying a coffee or paying for a taxi.
 - **Why mobile?** Tracking expenses must be done instantly at the point of sale. Splitting bills happens in real-time during trips.
 - **Hardest part:** 
-  1. **Algorithm:** Designing the debt simplification algorithm (e.g., A owes B $10, B owes C $10 -> A owes C $10).
+  1. **Algorithm:** Designing the debt simplification algorithm (`DebtSimplifier.kt` — thuật toán tham lam bipartite matching trên số nguyên Long VNĐ tránh sai số dấu phẩy động: A nợ B, B nợ C $\rightarrow$ A nợ C).
   2. **Data Structure:** Handling complex splitting scenarios without actual banking data.
-  3. **Sync:** Flexibly transferring calculated debts from the group trip into the local offline personal wallet.
+  3. **Sync:** Flexibly transferring calculated debts from the group trip into the local offline personal wallet (`GroupDetailViewModel.kt`).
 
 ## 6. Initial Design Sketch
 
 - **Main user flows:**
-  - *Flow 1 (Personal):* Home -> Add Transaction -> Input amount, category, note -> Save -> Update Wallet & Saving Goal progress.
-  - *Flow 2 (Group):* Trips -> Create "Da Lat Trip" -> Add Members -> Add Bill -> Select Payer & Beneficiaries -> View Settlement -> End Trip -> Sync to Personal Wallet.
+  - *Flow 1 (Personal):* Home -> Add Transaction -> Chọn ví (hoặc chọn "+ Ví khác..." để nhập tên ví mới tức thì) -> Nhập số tiền, danh mục, ghi chú -> Lưu -> Tự động cập nhật số dư ví & tiến độ mục tiêu tiết kiệm.
+  - *Flow 2 (Group):* Groups -> Chọn nhóm / Tạo nhóm mới -> Thêm chi tiêu chung (Người trả & danh sách người thụ hưởng) -> Chuyển sang Tab "Quyết toán" (Settlement) -> Xem phương án chuyển tiền tối giản -> Nhấn "Đồng bộ vào ví cá nhân" để ghi nhận phần chi tiêu vào sổ thu chi cá nhân.
 - **Data:** 
-  - Entities: `User`, `Wallet`, `Category`, `Transaction`, `Goal`, `Trip`, `TripMember`, `Bill`, `BillSplit`.
-  - Source: Local SQLite for personal data, Mock API/Backend for trip data (to share with other users).
+  - Entities: `User`, `Wallet`, `Category`, `Transaction`, `Goal`, `Group`, `GroupMember`, `Expense`, `ExpenseSplit`.
+  - Source: Local SQLite (Room DB) for personal data, Mock API/Backend for trip data (to share with other users).
 - **Offline:** Personal transactions, wallet balances, and saving goals must be 100% available without network.
 
 ## 7. Alternatives Considered

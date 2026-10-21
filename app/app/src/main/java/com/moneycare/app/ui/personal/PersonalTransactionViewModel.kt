@@ -105,6 +105,30 @@ class PersonalTransactionViewModel(
 
     fun clearSelectedTransaction() = _uiState.update { it.copy(selectedTransaction = null) }
 
+    fun createWalletAndSelect(
+        name: String,
+        onSuccess: (WalletResponse) -> Unit
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+            runCatching {
+                repository.createWallet(name.trim(), makeDefault = false)
+            }.onSuccess { createdWallet ->
+                _uiState.update { current ->
+                    val updatedWallets = (current.wallets + createdWallet).distinctBy { it.walletId }
+                    current.copy(
+                        wallets = updatedWallets,
+                        isSaving = false
+                    )
+                }
+                onSuccess(createdWallet)
+            }.onFailure { error ->
+                _uiState.update { it.copy(isSaving = false) }
+                showError(error)
+            }
+        }
+    }
+
     fun saveTransaction(
         id: Long?,
         request: PersonalTransactionRequest,

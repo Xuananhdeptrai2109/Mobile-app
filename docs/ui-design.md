@@ -45,12 +45,17 @@ flowchart TD
 
 | ID | Screen | Purpose | Main components | Data source |
 |:--:|--------|---------|-----------------|-------------|
-| `SCR-01` | **Home (Personal)** | Dashboard for individual finance. | Balance card, Income/Expense summary, Saving goal progress, Recent transactions. | Local DB (SQLite) |
+| `SCR-01` | **Home (Personal)** | Dashboard for individual finance. | Balance card, Income/Expense summary, Saving goal progress, Recent transactions. | Local DB (SQLite/Room) |
 | `SCR-02` | **Home (Group)** | List of active shared groups and tasks. | Group cards (members, budget), Task list summary. | API / Local Cache |
-| `SCR-03` | **Group Overview** | Main hub for a specific group. | Tab bar (Overview, Expenses, Tasks, Members), Budget progress bar, Quick stats. | API / Local Cache |
+| `SCR-03` | **Group Overview / Detail** | Main hub for a specific group. | Tab bar (Overview, Expenses, Tasks, Members, Settlement), Budget progress bar, Quick stats. | API / Local Cache |
 | `SCR-04` | **Add Expense** | Form to log a shared bill. | Amount input, Category picker, Payer selection, Split distribution (equal/custom). | User Input -> API |
 | `SCR-05` | **Expense Detail** | View breakdown of a specific bill. | Total amount, Payer, List of members with calculated owed amounts. | API / Local Cache |
 | `SCR-06` | **Member Detail** | Show financial standing of one person. | Total paid, Total owed, Received amounts, Related transactions. | API / Local Cache |
+| `SCR-07` | **Wallet Management** | Quản lý danh mục ví thanh toán cá nhân. | Danh sách thẻ ví với bảng 10 màu Pastel ngẫu nhiên, tổng số dư các ví, nút tạo ví mới. | Local DB / Repository |
+| `SCR-08` | **Transaction Form** | Form nhập thu nhập / chi tiêu cá nhân nhanh. | Trường nhập tiền, chọn danh mục, bộ chọn ví linh hoạt (kèm lựa chọn "+ Ví khác..." tạo ví tức thì). | Local DB / User Input |
+| `SCR-09` | **Debt Settlement (Quyết toán)** | Tab quyết toán rút gọn nợ trong nhóm. | Thẻ thống kê (Đã chi, Phải chịu, Net Balance), danh sách chuyển tiền tối giản (Greedy matching), nút "Đồng bộ vào ví cá nhân". | `DebtSimplifier` / Group ViewModel |
+| `SCR-10` | **Savings Goals** | Quản lý và theo dõi các mục tiêu tiết kiệm. | Danh sách mục tiêu, thanh tiến độ % hoàn thành, số tiền còn thiếu, nút nạp tiền vào quỹ. | Local DB (SQLite/Room) |
+| `SCR-11` | **Auth (Login / Register)** | Xác thực và phân quyền tài khoản người dùng. | Form đăng nhập/đăng ký với kiểm tra tính hợp lệ dữ liệu trực quan (validation states). | Remote REST API / Keystore |
 
 ---
 
@@ -64,11 +69,17 @@ The UI design is based on the provided high-fidelity mockups.
 
 *Figure 1. Overview of the Personal and Group home dashboards.*
 
-### 4.2 Group Expense Management Flow
+### 4.3 Actual Implemented Screens (Milestone M3 Screenshots)
 
-![Group expense management flow details](asset/wireframes/group-expense-flow-details.png)
+Bằng chứng triển khai thực tế trên thiết bị di động (10 màn hình chuẩn):
 
-*Figure 2. Detailed screens for the group expense management flow.*
+| 01. Login | 02. Register | 03. Home (Personal) | 04. Transaction Form | 05. Savings Goals |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Login](asset/screenshots/01-auth-login.png) | ![Register](asset/screenshots/02-auth-register.png) | ![Home](asset/screenshots/03-home-personal.png) | ![Form](asset/screenshots/04-transaction-form.png) | ![Savings](asset/screenshots/05-savings-goals.png) |
+
+| 06. Wallet Management | 07. Home (Group) | 08. Group Detail | 09. Add Expense Split | 10. Debt Settlement |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Wallets](asset/screenshots/06-wallets.png) | ![Group Home](asset/screenshots/07-home-group.png) | ![Detail](asset/screenshots/08-group-detail.png) | ![Split](asset/screenshots/09-add-expense-split.png) | ![Settlement](asset/screenshots/10-debt-settlement.png) |
 
 ---
 
@@ -85,6 +96,7 @@ The UI design is based on the provided high-fidelity mockups.
 | `text-primary` | `#111827` | `#F9FAFB` | Main headings, transaction names. |
 | `error` | `#EF4444` (Red) | `#F87171` | Expenses, debt ("Cần trả"), delete actions. |
 | `success` | `#10B981` | `#34D399` | Settled debts ("Đã thanh toán"), completed tasks. |
+| `pastel-palette` | Bảng 10 màu Pastel nhẹ nhàng | Biến thể Pastel tối ưu | Hiển thị thẻ ví phân biệt trực quan trong `WalletManagementScreen` (`#E0F2FE`, `#DCFCE7`, `#FEF3C7`, `#FCE7F3`, `#F3E8FF`, `#CCFBF1`, `#FFEDD5`, `#EDE9FE`, `#CFFAFE`, `#F1F5F9`). |
 
 ### 5.2 Typography & spacing
 

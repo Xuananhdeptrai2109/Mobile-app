@@ -22,6 +22,7 @@ import retrofit2.HttpException
 enum class GroupDetailTab(val label: String) {
     OVERVIEW("Tổng quan"),
     EXPENSES("Chi tiêu"),
+    SETTLEMENT("Quyết toán"),
     TASKS("Nhiệm vụ"),
     MEMBERS("Thành viên"),
     ACTIVITY("Hoạt động")
@@ -594,6 +595,79 @@ class GroupDetailViewModel(
                         )
                     }
                 }
+        }
+    }
+
+    fun syncTripToPersonalWallet(
+        walletId: Long,
+        categoryId: Long,
+        amount: Long,
+        onSuccess: () -> Unit
+    ) {
+        val group = _uiState.value.group ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+            runCatching {
+                val personalRepo = com.moneycare.app.data.repository.PersonalFinanceRepository()
+                val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+                personalRepo.createTransaction(
+                    com.moneycare.app.data.model.personal.PersonalTransactionRequest(
+                        title = "Chi tiêu chuyến đi: ${group.name}",
+                        amount = amount,
+                        type = com.moneycare.app.data.model.TransactionType.EXPENSE,
+                        categoryId = categoryId,
+                        walletId = walletId,
+                        note = "Tự động đồng bộ chi phí từ nhóm ${group.name}",
+                        transactionTime = timestamp
+                    )
+                )
+            }.onSuccess {
+                _uiState.update { it.copy(isSaving = false) }
+                onSuccess()
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = error.toUserMessage("Không thể đồng bộ vào ví cá nhân")
+                    )
+                }
+            }
+        }
+    }
+
+    fun settleDebtBetweenMembers(fromMemberId: String, toMemberId: String, onSuccess: () -> Unit = {}) {
+        val group = _uiState.value.group ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+            runCatching {
+                val updatedExpenses = group.expenses.map { expense ->
+                    if (expense.paidBy.id == toMemberId) {
+                        val newSplits = expense.splitMembers.map { split ->
+                            if (split.member.id == fromMemberId && !split.isPaid) {
+                                if (split.id.isNotBlank()) {
+                                    runCatching { repository.toggleSplitPayment(group.id, expense.id, split.id) }
+                                }
+                                split.copy(isPaid = true)
+                            } else split
+                        }
+                        expense.copy(
+                            splitMembers = newSplits,
+                            isSettled = newSplits.isNotEmpty() && newSplits.all { it.isPaid }
+                        )
+                    } else expense
+                }
+                group.copy(expenses = updatedExpenses)
+            }.onSuccess { updatedGroup ->
+                _uiState.update { it.copy(group = updatedGroup, isSaving = false) }
+                onSuccess()
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = error.toUserMessage("Không thể cập nhật quyết toán")
+                    )
+                }
+            }
         }
     }
 

@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,8 +42,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.moneycare.app.data.model.GroupMember
+import com.moneycare.app.ui.theme.DarkGreen
 import com.moneycare.app.ui.theme.LightGreen
+import com.moneycare.app.ui.theme.PrimaryGreen
+import com.moneycare.app.ui.theme.SoftRed
+import com.moneycare.app.util.DebtSimplifier
 import com.moneycare.app.util.toVnd
 import com.moneycare.app.viewmodel.GroupReportViewModel
 
@@ -121,7 +129,63 @@ fun GroupReportScreen(
                             }
                         }
                     }
-                    item { Text("Theo thành viên", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    item {
+                        val membersList = remember(report.members) {
+                            report.members.map { GroupMember(id = it.memberId.toString(), name = it.fullName) }
+                        }
+                        val netBalancesMap = remember(report.members) {
+                            report.members.associate { it.memberId.toString() to it.netBalance }
+                        }
+                        val settlements = remember(membersList, netBalancesMap) {
+                            DebtSimplifier.simplifyDebts(membersList, netBalancesMap)
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Kế hoạch Quyết toán Nợ (Rút gọn tối ưu)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            if (settlements.isEmpty()) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = PrimaryGreen)
+                                        Text("Tất cả công nợ đã được thanh toán hoàn tất!", fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                            } else {
+                                settlements.forEach { settle ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(settle.fromMemberName, fontWeight = FontWeight.Bold, color = SoftRed)
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(settle.amount.toVnd(), fontWeight = FontWeight.Bold, color = DarkGreen)
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.ArrowForward,
+                                                    contentDescription = null,
+                                                    tint = PrimaryGreen,
+                                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                                )
+                                            }
+                                            Text(settle.toMemberName, fontWeight = FontWeight.Bold, color = DarkGreen)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Text("Chi tiết theo thành viên", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     items(report.members, key = { it.memberId }) { member ->
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
