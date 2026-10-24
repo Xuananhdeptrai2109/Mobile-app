@@ -16,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -30,7 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneycare.app.data.model.ExpenseSplit
 import com.moneycare.app.data.model.ExpenseSplitMethod
+import com.moneycare.app.data.model.GroupMember
 import com.moneycare.app.ui.components.*
+import com.moneycare.app.ui.group.GroupRouteStateScreen
 import com.moneycare.app.ui.theme.LightGreen
 import com.moneycare.app.ui.theme.PrimaryGreen
 import com.moneycare.app.viewmodel.GroupDetailViewModel
@@ -38,6 +42,7 @@ import com.moneycare.app.viewmodel.GroupDetailViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddExpenseScreen(
+    groupId: String,
     expenseId: String? = null,
     onBackClick: () -> Unit,
     viewModel: GroupDetailViewModel,
@@ -45,9 +50,34 @@ fun AddExpenseScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    val group = uiState.group ?: return
+
+    LaunchedEffect(groupId) {
+        viewModel.ensureGroupLoaded(groupId)
+    }
+
+    val group = uiState.group?.takeIf { it.id == groupId }
+    if (group == null) {
+        GroupRouteStateScreen(
+            title = if (expenseId == null) "Thêm chi tiêu" else "Sửa chi tiêu",
+            errorMessage = uiState.errorMessage,
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
+    }
     val existingExpense = remember(group.expenses, expenseId) {
         expenseId?.let { id -> group.expenses.find { it.id == id } }
+    }
+    if (expenseId != null && existingExpense == null) {
+        GroupRouteStateScreen(
+            title = "Sửa chi tiêu",
+            errorMessage = "Không tìm thấy khoản chi này",
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
     }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -59,19 +89,39 @@ fun AddExpenseScreen(
         }
     }
     
-    var title by remember(expenseId) { mutableStateOf(existingExpense?.title.orEmpty()) }
-    var amount by remember(expenseId) { mutableLongStateOf(existingExpense?.amount ?: 0L) }
-    var noteInput by remember(expenseId) { mutableStateOf(existingExpense?.note.orEmpty()) }
-    
-    var paidBy by remember(group.id) { 
-        mutableStateOf(existingExpense?.paidBy ?: group.members.firstOrNull { it.isCurrentUser } ?: group.members.firstOrNull() ?: com.moneycare.app.data.model.GroupMember("", "N/A"))
+    var title by rememberSaveable(groupId, expenseId) {
+        mutableStateOf(existingExpense?.title.orEmpty())
     }
-    var splitMembers by remember(group.id) { 
+    var amount by rememberSaveable(groupId, expenseId) {
+        mutableLongStateOf(existingExpense?.amount ?: 0L)
+    }
+    var noteInput by rememberSaveable(groupId, expenseId) {
+        mutableStateOf(existingExpense?.note.orEmpty())
+    }
+    
+    var paidById by rememberSaveable(groupId, expenseId) {
+        mutableStateOf(
+            (existingExpense?.paidBy
+                ?: group.members.firstOrNull { it.isCurrentUser }
+                ?: group.members.firstOrNull()
+                ?: GroupMember("", "N/A")).id
+        )
+    }
+    val paidBy = group.members.firstOrNull { it.id == paidById }
+        ?: existingExpense?.paidBy
+        ?: group.members.firstOrNull()
+        ?: GroupMember("", "N/A")
+    var splitMembers by rememberSaveable(
+        groupId,
+        expenseId,
+        stateSaver = ExpenseSplitsSaver
+    ) {
         mutableStateOf(existingExpense?.splitMembers ?: group.members.map { ExpenseSplit(it, 0L) })
     }
-    var splitMethod by remember(expenseId) {
-        mutableStateOf(existingExpense?.splitMethod ?: ExpenseSplitMethod.EQUAL)
+    var splitMethodName by rememberSaveable(groupId, expenseId) {
+        mutableStateOf((existingExpense?.splitMethod ?: ExpenseSplitMethod.EQUAL).name)
     }
+    val splitMethod = ExpenseSplitMethod.valueOf(splitMethodName)
     val splitIsValid = remember(splitMembers, splitMethod, amount) {
         when (splitMethod) {
             ExpenseSplitMethod.EQUAL -> splitMembers.isNotEmpty()
@@ -84,7 +134,7 @@ fun AddExpenseScreen(
     }
     
     val memberSheetState = rememberModalBottomSheetState()
-    var showMemberSheet by remember { mutableStateOf(false) }
+    var showMemberSheet by rememberSaveable { mutableStateOf(false) }
 
     // Receipt Image Picker Launcher for AI extraction
     val receiptLauncher = rememberLauncherForActivityResult(
@@ -206,7 +256,7 @@ fun AddExpenseScreen(
                                     FilterChip(
                                         selected = splitMethod == method,
                                         onClick = {
-                                            splitMethod = method
+                                            splitMethodName = method.name
                                             splitMembers = redistributeSplits(splitMembers, amount, method)
                                         },
                                         label = { Text(method.label, maxLines = 1) },
@@ -398,7 +448,7 @@ fun AddExpenseScreen(
     if (showMemberSheet) {
         MemberPickerBottomSheet(
             allMembers = group.members,
-            onMemberSelected = { paidBy = it },
+            onMemberSelected = { paidById = it.id },
             onDismiss = { showMemberSheet = false },
             sheetState = memberSheetState
         )
@@ -448,6 +498,44 @@ private fun AttachmentButton(
         }
     }
 }
+
+private val ExpenseSplitsSaver = listSaver<List<ExpenseSplit>, String>(
+    save = { splits ->
+        splits.flatMap { split ->
+            listOf(
+                split.member.id,
+                split.member.name,
+                split.member.role,
+                split.member.avatarUrl.orEmpty(),
+                split.member.isCurrentUser.toString(),
+                split.member.userId?.toString().orEmpty(),
+                split.amount.toString(),
+                split.percentage?.toString().orEmpty(),
+                split.isPaid.toString(),
+                split.id
+            )
+        }
+    },
+    restore = { values ->
+        values.chunked(10).mapNotNull { value ->
+            if (value.size != 10) return@mapNotNull null
+            ExpenseSplit(
+                member = GroupMember(
+                    id = value[0],
+                    name = value[1],
+                    role = value[2],
+                    avatarUrl = value[3].ifBlank { null },
+                    isCurrentUser = value[4].toBoolean(),
+                    userId = value[5].toLongOrNull()
+                ),
+                amount = value[6].toLongOrNull() ?: 0L,
+                percentage = value[7].toDoubleOrNull(),
+                isPaid = value[8].toBoolean(),
+                id = value[9]
+            )
+        }
+    }
+)
 
 private fun redistributeSplits(
     splits: List<ExpenseSplit>,

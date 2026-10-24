@@ -4,12 +4,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.moneycare.app.data.model.GroupMember
 import com.moneycare.app.ui.components.*
+import com.moneycare.app.ui.group.GroupRouteStateScreen
 import com.moneycare.app.ui.theme.ScreenBackground
 import com.moneycare.app.viewmodel.GroupDetailViewModel
 import java.time.LocalDate
@@ -18,13 +20,29 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTaskScreen(
+    groupId: String,
     taskId: String? = null,
     onBackClick: () -> Unit,
     viewModel: GroupDetailViewModel,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val group = uiState.group ?: return
+
+    LaunchedEffect(groupId) {
+        viewModel.ensureGroupLoaded(groupId)
+    }
+
+    val group = uiState.group?.takeIf { it.id == groupId }
+    if (group == null) {
+        GroupRouteStateScreen(
+            title = if (taskId == null) "Thêm nhiệm vụ" else "Sửa nhiệm vụ",
+            errorMessage = uiState.errorMessage,
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
+    }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -38,29 +56,44 @@ fun AddTaskScreen(
     val existingTask = remember(taskId, group.tasks) {
         taskId?.let { id -> group.tasks.find { it.id == id } }
     }
+    if (taskId != null && existingTask == null) {
+        GroupRouteStateScreen(
+            title = "Sửa nhiệm vụ",
+            errorMessage = "Không tìm thấy nhiệm vụ này",
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
+    }
     val isEditing = existingTask != null
     val currentUserIsOwner = group.members.any {
         it.isCurrentUser && it.role.equals("OWNER", ignoreCase = true)
     }
 
-    var title by remember { mutableStateOf(existingTask?.title ?: "") }
-    var assignee by remember { 
+    var title by rememberSaveable(groupId, taskId) { mutableStateOf(existingTask?.title ?: "") }
+    var assigneeId by rememberSaveable(groupId, taskId) {
         mutableStateOf(
-            existingTask?.assignee 
-                ?: group.members.firstOrNull { it.isCurrentUser } 
-                ?: group.members.first()
-        ) 
+            (existingTask?.assignee
+                ?: group.members.firstOrNull { it.isCurrentUser }
+                ?: group.members.first()).id
+        )
     }
-    var dueDate by remember {
+    val assignee = group.members.firstOrNull { it.id == assigneeId }
+        ?: existingTask?.assignee
+        ?: group.members.first()
+    var dueDate by rememberSaveable(groupId, taskId) {
         mutableStateOf(
             existingTask?.dueDate
                 ?: LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
         )
     }
-    var description by remember { mutableStateOf(existingTask?.description ?: "") }
+    var description by rememberSaveable(groupId, taskId) {
+        mutableStateOf(existingTask?.description ?: "")
+    }
     
     val memberSheetState = rememberModalBottomSheetState()
-    var showMemberSheet by remember { mutableStateOf(false) }
+    var showMemberSheet by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -189,7 +222,7 @@ fun AddTaskScreen(
     if (showMemberSheet) {
         MemberPickerBottomSheet(
             allMembers = group.members,
-            onMemberSelected = { assignee = it },
+            onMemberSelected = { assigneeId = it.id },
             onDismiss = { showMemberSheet = false },
             sheetState = memberSheetState
         )

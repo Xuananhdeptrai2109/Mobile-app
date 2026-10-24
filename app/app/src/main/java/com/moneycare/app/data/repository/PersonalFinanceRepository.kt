@@ -2,6 +2,7 @@ package com.moneycare.app.data.repository
 
 import com.moneycare.app.data.api.ApiService
 import com.moneycare.app.data.api.RetrofitClient
+import com.moneycare.app.data.local.PersonalFinanceCache
 import com.moneycare.app.data.model.PersonalDashboard
 import com.moneycare.app.data.model.SavingsGoal
 import com.moneycare.app.data.model.Transaction
@@ -9,18 +10,30 @@ import com.moneycare.app.data.model.TransactionType
 import com.moneycare.app.data.model.personal.*
 
 class PersonalFinanceRepository(
-    private val apiService: ApiService = RetrofitClient.apiService
+    private val apiService: ApiService = RetrofitClient.apiService,
+    private val localDataSource: PersonalFinanceCache? = null,
+    private val userIdProvider: () -> Long = {
+        runCatching { com.moneycare.app.MoneyCareApp.instance.sessionManager.getUserId() }.getOrDefault(-1L)
+    }
 ) {
-    suspend fun getDashboard(month: String): PersonalDashboard =
-        apiService.getPersonalDashboard(month).let { response ->
-            PersonalDashboard(
-                month = response.month,
-                balance = response.balance,
-                income = response.income,
-                expense = response.expense,
-                recentTransactions = response.recentTransactions.map { it.toUiModel() }
-            )
+    suspend fun getDashboard(month: String): PersonalDashboard {
+        val userId = userIdProvider()
+        return try {
+            apiService.getPersonalDashboard(month).let { response ->
+                if (userId > 0) localDataSource?.cacheDashboard(userId, response)
+                PersonalDashboard(
+                    month = response.month,
+                    balance = response.balance,
+                    income = response.income,
+                    expense = response.expense,
+                    recentTransactions = response.recentTransactions.map { it.toUiModel() }
+                )
+            }
+        } catch (remoteError: Exception) {
+            localDataSource?.takeIf { userId > 0 }?.getDashboard(userId, month)
+                ?: throw remoteError
         }
+    }
 
     suspend fun getTransactions(
         month: String,
@@ -30,54 +43,121 @@ class PersonalFinanceRepository(
         page: Int = 0,
         size: Int = 20
     ): PagedResponse<Transaction> {
-        val response = apiService.getPersonalTransactions(
-            month = month,
-            type = type?.name,
-            categoryId = categoryId,
-            query = query?.trim()?.takeIf { it.isNotEmpty() },
-            page = page,
-            size = size
-        )
-        return PagedResponse(
-            content = response.content.map { it.toUiModel() },
-            page = response.page,
-            size = response.size,
-            totalElements = response.totalElements,
-            totalPages = response.totalPages,
-            first = response.first,
-            last = response.last
-        )
+        val userId = userIdProvider()
+        return try {
+            val response = apiService.getPersonalTransactions(
+                month = month,
+                type = type?.name,
+                categoryId = categoryId,
+                query = query?.trim()?.takeIf { it.isNotEmpty() },
+                page = page,
+                size = size
+            )
+            if (userId > 0) {
+                localDataSource?.replaceTransactionPage(
+                    userId = userId,
+                    month = month,
+                    page = page,
+                    replaceWholeMonth = type == null && categoryId == null && query.isNullOrBlank(),
+                    items = response.content
+                )
+            }
+            PagedResponse(
+                content = response.content.map { it.toUiModel() },
+                page = response.page,
+                size = response.size,
+                totalElements = response.totalElements,
+                totalPages = response.totalPages,
+                first = response.first,
+                last = response.last
+            )
+        } catch (remoteError: Exception) {
+            val cached = localDataSource?.takeIf { userId > 0 }?.getTransactions(
+                userId, month, type, categoryId, query, page, size
+            )
+            cached ?: throw remoteError
+        }
     }
 
-    suspend fun getTransaction(id: Long): Transaction =
-        apiService.getPersonalTransaction(id).toUiModel()
+    suspend fun getTransaction(id: Long): Transaction {
+        val userId = userIdProvider()
+        return try {
+            val response = apiService.getPersonalTransaction(id)
+            if (userId > 0) localDataSource?.upsertTransaction(userId, response)
+            response.toUiModel()
+        } catch (remoteError: Exception) {
+            localDataSource?.takeIf { userId > 0 }?.getTransaction(userId, id)
+                ?: throw remoteError
+        }
+    }
 
-    suspend fun createTransaction(request: PersonalTransactionRequest): Transaction =
-        apiService.createPersonalTransaction(request).toUiModel()
+    suspend fun createTransaction(request: PersonalTransactionRequest): Transaction {
+        val response = apiService.createPersonalTransaction(request)
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.upsertTransaction(it, response) }
+        return response.toUiModel()
+    }
 
-    suspend fun updateTransaction(id: Long, request: PersonalTransactionRequest): Transaction =
-        apiService.updatePersonalTransaction(id, request).toUiModel()
+    suspend fun syncGroupToWallet(
+        groupId: Long,
+        walletId: Long,
+        categoryId: Long
+    ): Transaction {
+        val response = apiService.syncGroupExpenseToPersonal(
+            groupId,
+            SyncGroupExpenseRequest(walletId = walletId, categoryId = categoryId)
+        )
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.upsertTransaction(it, response) }
+        return response.toUiModel()
+    }
 
-    suspend fun deleteTransaction(id: Long) = apiService.deletePersonalTransaction(id)
+    suspend fun updateTransaction(id: Long, request: PersonalTransactionRequest): Transaction {
+        val response = apiService.updatePersonalTransaction(id, request)
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.upsertTransaction(it, response) }
+        return response.toUiModel()
+    }
+
+    suspend fun deleteTransaction(id: Long) {
+        apiService.deletePersonalTransaction(id)
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.deleteTransaction(it, id) }
+    }
 
     suspend fun getCategories(type: TransactionType? = null): List<PersonalCategoryResponse> =
         apiService.getPersonalCategories(type?.name)
 
-    suspend fun getWallets(): List<WalletResponse> = apiService.getWallets()
+    suspend fun getWallets(): List<WalletResponse> {
+        val userId = userIdProvider()
+        return try {
+            apiService.getWallets().also { wallets ->
+                if (userId > 0) localDataSource?.replaceWallets(userId, wallets)
+            }
+        } catch (remoteError: Exception) {
+            val cached = localDataSource?.takeIf { userId > 0 }?.getWallets(userId)
+            cached ?: throw remoteError
+        }
+    }
 
-    suspend fun createWallet(name: String, makeDefault: Boolean): WalletResponse =
-        apiService.createWallet(CreateWalletRequest(name.trim(), makeDefault))
+    suspend fun createWallet(name: String, makeDefault: Boolean): WalletResponse {
+        val response = apiService.createWallet(CreateWalletRequest(name.trim(), makeDefault))
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.upsertWallet(it, response) }
+        return response
+    }
 
-    suspend fun updateWallet(id: Long, name: String?, makeDefault: Boolean?): WalletResponse =
-        apiService.updateWallet(
+    suspend fun updateWallet(id: Long, name: String?, makeDefault: Boolean?): WalletResponse {
+        val response = apiService.updateWallet(
             id,
             UpdateWalletRequest(
                 name = name?.trim(),
                 isDefault = makeDefault
             )
         )
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.upsertWallet(it, response) }
+        return response
+    }
 
-    suspend fun deleteWallet(id: Long) = apiService.deleteWallet(id)
+    suspend fun deleteWallet(id: Long) {
+        apiService.deleteWallet(id)
+        userIdProvider().takeIf { it > 0 }?.let { localDataSource?.deleteWallet(it, id) }
+    }
 
     suspend fun getNotifications(): List<NotificationResponse> = apiService.getNotifications()
 

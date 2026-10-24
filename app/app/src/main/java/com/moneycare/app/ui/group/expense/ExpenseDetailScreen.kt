@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -21,11 +22,13 @@ import com.moneycare.app.ui.components.ExpenseSummaryCard
 import com.moneycare.app.ui.components.GroupDetailTopBar
 import com.moneycare.app.ui.theme.ScreenBackground
 import com.moneycare.app.ui.group.ConfirmGroupActionDialog
+import com.moneycare.app.ui.group.GroupRouteStateScreen
 import com.moneycare.app.viewmodel.GroupDetailViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpenseDetailScreen(
+    groupId: String,
     expenseId: String,
     onBackClick: () -> Unit,
     onEditClick: (String) -> Unit,
@@ -35,13 +38,27 @@ fun ExpenseDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     
-    LaunchedEffect(expenseId) {
-        viewModel.loadExpenseDetail(expenseId)
+    LaunchedEffect(groupId) {
+        viewModel.ensureGroupLoaded(groupId)
     }
-    
-    val expense = uiState.selectedExpense ?: return
+
+    LaunchedEffect(groupId, expenseId, uiState.group) {
+        if (uiState.group?.id == groupId) viewModel.loadExpenseDetail(expenseId)
+    }
+
+    val expense = uiState.selectedExpense?.takeIf { it.id == expenseId }
+    if (expense == null) {
+        GroupRouteStateScreen(
+            title = "Chi tiết chi tiêu",
+            errorMessage = uiState.errorMessage,
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
+    }
     val currentUserIsOwner = uiState.group?.members?.any {
         it.isCurrentUser && it.role.equals("OWNER", ignoreCase = true)
     } == true

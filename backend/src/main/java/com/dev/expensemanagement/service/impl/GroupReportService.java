@@ -7,11 +7,13 @@ import com.dev.expensemanagement.entity.GroupExpense;
 import com.dev.expensemanagement.entity.GroupExpenseSplit;
 import com.dev.expensemanagement.entity.GroupMember;
 import com.dev.expensemanagement.entity.GroupTask;
+import com.dev.expensemanagement.entity.GroupSettlement;
 import com.dev.expensemanagement.repository.ExpenseGroupRepository;
 import com.dev.expensemanagement.repository.GroupExpenseRepository;
 import com.dev.expensemanagement.repository.GroupExpenseSplitRepository;
 import com.dev.expensemanagement.repository.GroupMemberRepository;
 import com.dev.expensemanagement.repository.GroupTaskRepository;
+import com.dev.expensemanagement.repository.GroupSettlementRepository;
 import com.dev.expensemanagement.security.GroupAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +32,7 @@ public class GroupReportService {
     private final GroupExpenseRepository expenseRepository;
     private final GroupExpenseSplitRepository splitRepository;
     private final GroupTaskRepository taskRepository;
+    private final GroupSettlementRepository settlementRepository;
     private final GroupAuthorizationService authorizationService;
 
     @Transactional(readOnly = true)
@@ -40,14 +45,37 @@ public class GroupReportService {
         List<GroupTask> tasks = taskRepository.findByGroup_Id(groupId);
 
         List<GroupExpenseSplit> allSplits = splitRepository.findByExpense_Group_Id(groupId);
+        List<GroupSettlement> settlements = settlementRepository.findByGroup_IdOrderBySettledAtDesc(groupId);
 
         BigDecimal totalExpense = expenses.stream()
                 .map(GroupExpense::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal settled = allSplits.stream().filter(GroupExpenseSplit::isPaid)
-                .map(GroupExpenseSplit::getSplitAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal outstanding = allSplits.stream().filter(split -> !split.isPaid())
-                .map(GroupExpenseSplit::getSplitAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal settled = allSplits.stream()
+                .filter(GroupExpenseSplit::isPaid)
+                .filter(split -> !split.getMember().getId().equals(split.getExpense().getPaidBy().getId()))
+                .map(GroupExpenseSplit::getSplitAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .add(settlements.stream().map(GroupSettlement::getAmount)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
+
+        Map<Long, BigDecimal> balances = new HashMap<>();
+        members.forEach(member -> balances.put(member.getId(), BigDecimal.ZERO));
+        allSplits.stream().filter(split -> !split.isPaid()).forEach(split -> {
+            Long payerId = split.getExpense().getPaidBy().getId();
+            Long memberId = split.getMember().getId();
+            if (!payerId.equals(memberId)) {
+                balances.merge(memberId, split.getSplitAmount().negate(), BigDecimal::add);
+                balances.merge(payerId, split.getSplitAmount(), BigDecimal::add);
+            }
+        });
+        settlements.forEach(item -> {
+            balances.merge(item.getFromMember().getId(), item.getAmount(), BigDecimal::add);
+            balances.merge(item.getToMember().getId(), item.getAmount().negate(), BigDecimal::add);
+        });
+        BigDecimal outstanding = balances.values().stream()
+                .filter(balance -> balance.signum() < 0)
+                .map(BigDecimal::negate)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         List<GroupMemberReportResponse> memberReports = members.stream().map(member -> {
             BigDecimal paid = expenses.stream()
@@ -58,15 +86,21 @@ public class GroupReportService {
             BigDecimal owed = memberSplits.stream().map(GroupExpenseSplit::getSplitAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal memberSettled = memberSplits.stream().filter(GroupExpenseSplit::isPaid)
-                    .map(GroupExpenseSplit::getSplitAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .filter(split -> !split.getExpense().getPaidBy().getId().equals(member.getId()))
+                    .map(GroupExpenseSplit::getSplitAmount).reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .add(settlements.stream()
+                            .filter(item -> item.getFromMember().getId().equals(member.getId()))
+                            .map(GroupSettlement::getAmount)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add));
+            BigDecimal currentBalance = balances.getOrDefault(member.getId(), BigDecimal.ZERO);
             return GroupMemberReportResponse.builder()
                     .memberId(member.getId())
                     .fullName(member.getName())
                     .totalPaid(paid)
                     .totalOwed(owed)
                     .settledAmount(memberSettled)
-                    .outstandingAmount(owed.subtract(memberSettled))
-                    .netBalance(paid.subtract(owed))
+                    .outstandingAmount(currentBalance.signum() < 0 ? currentBalance.negate() : BigDecimal.ZERO)
+                    .netBalance(currentBalance)
                     .build();
         }).toList();
 

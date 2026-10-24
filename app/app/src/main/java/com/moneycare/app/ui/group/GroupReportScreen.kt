@@ -49,6 +49,8 @@ import com.moneycare.app.ui.theme.DarkGreen
 import com.moneycare.app.ui.theme.LightGreen
 import com.moneycare.app.ui.theme.PrimaryGreen
 import com.moneycare.app.ui.theme.SoftRed
+import com.moneycare.app.ui.components.ErrorRetryContent
+import com.moneycare.app.ui.state.LoadState
 import com.moneycare.app.util.DebtSimplifier
 import com.moneycare.app.util.toVnd
 import com.moneycare.app.viewmodel.GroupReportViewModel
@@ -82,7 +84,7 @@ fun GroupReportScreen(
 
     LaunchedEffect(groupId) { viewModel.load(groupId) }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.report != null) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -101,15 +103,27 @@ fun GroupReportScreen(
             )
         }
     ) { padding ->
-        when {
-            state.isLoading && state.report == null -> Column(
+        when (val content = state.contentState) {
+            LoadState.Loading -> Column(
                 Modifier.fillMaxSize().padding(padding),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) { CircularProgressIndicator() }
 
-            state.report != null -> {
-                val report = state.report!!
+            is LoadState.Error -> ErrorRetryContent(
+                message = content.message,
+                onRetry = { viewModel.load(groupId) },
+                modifier = Modifier.padding(padding)
+            )
+
+            LoadState.Empty -> ErrorRetryContent(
+                message = "Chưa có dữ liệu báo cáo",
+                onRetry = { viewModel.load(groupId) },
+                modifier = Modifier.padding(padding)
+            )
+
+            is LoadState.Success -> {
+                val report = content.data
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(16.dp),

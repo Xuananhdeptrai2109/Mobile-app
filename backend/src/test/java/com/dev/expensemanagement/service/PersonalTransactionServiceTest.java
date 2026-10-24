@@ -1,15 +1,22 @@
 package com.dev.expensemanagement.service;
 
 import com.dev.expensemanagement.dto.request.PersonalTransactionRequest;
+import com.dev.expensemanagement.dto.request.SyncGroupExpenseRequest;
 import com.dev.expensemanagement.entity.PersonalCategory;
 import com.dev.expensemanagement.entity.PersonalTransaction;
 import com.dev.expensemanagement.entity.PersonalTransactionType;
 import com.dev.expensemanagement.entity.PersonalWallet;
 import com.dev.expensemanagement.entity.User;
+import com.dev.expensemanagement.entity.ExpenseGroup;
+import com.dev.expensemanagement.entity.GroupExpense;
+import com.dev.expensemanagement.entity.GroupExpenseSplit;
+import com.dev.expensemanagement.entity.GroupMember;
 import com.dev.expensemanagement.repository.PersonalCategoryRepository;
 import com.dev.expensemanagement.repository.PersonalTransactionRepository;
 import com.dev.expensemanagement.repository.PersonalWalletRepository;
 import com.dev.expensemanagement.repository.UserRepository;
+import com.dev.expensemanagement.repository.GroupExpenseSplitRepository;
+import com.dev.expensemanagement.security.GroupAuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
@@ -31,6 +38,8 @@ class PersonalTransactionServiceTest {
     private PersonalWalletRepository walletRepository;
     private PersonalCategoryRepository categoryRepository;
     private UserRepository userRepository;
+    private GroupExpenseSplitRepository groupExpenseSplitRepository;
+    private GroupAuthorizationService groupAuthorizationService;
     private PersonalTransactionService service;
 
     @BeforeEach
@@ -39,11 +48,15 @@ class PersonalTransactionServiceTest {
         walletRepository = mock(PersonalWalletRepository.class);
         categoryRepository = mock(PersonalCategoryRepository.class);
         userRepository = mock(UserRepository.class);
+        groupExpenseSplitRepository = mock(GroupExpenseSplitRepository.class);
+        groupAuthorizationService = mock(GroupAuthorizationService.class);
         service = new PersonalTransactionService(
                 transactionRepository,
                 walletRepository,
                 categoryRepository,
-                userRepository
+                userRepository,
+                groupExpenseSplitRepository,
+                groupAuthorizationService
         );
     }
 
@@ -235,6 +248,117 @@ class PersonalTransactionServiceTest {
                 eq("cơm"),
                 any(Pageable.class)
         );
+    }
+
+    @Test
+    void groupSyncUsesServerCalculatedShareAndSubtractsWalletOnce() {
+        User user = User.builder().id(7L).build();
+        PersonalWallet wallet = wallet(11L, user, 1_000_000);
+        PersonalCategory category = category(21L, PersonalTransactionType.EXPENSE);
+        ExpenseGroup group = ExpenseGroup.builder().id(5L).name("Trip").createdBy(user).build();
+        GroupMember member = GroupMember.builder().id(31L).group(group).user(user).name("An").build();
+        GroupExpense expense = GroupExpense.builder().id(41L).group(group).paidBy(member).build();
+        GroupExpenseSplit split = GroupExpenseSplit.builder()
+                .id(51L)
+                .expense(expense)
+                .member(member)
+                .splitAmount(BigDecimal.valueOf(250_000))
+                .build();
+
+        when(transactionRepository.findByUserIdAndSourceGroupIdForUpdate(7L, 5L))
+                .thenReturn(Optional.empty());
+        when(groupAuthorizationService.requireMemberForUpdate(5L, 7L)).thenReturn(member);
+        when(walletRepository.findOwnedForUpdate(11L, 7L)).thenReturn(Optional.of(wallet));
+        when(groupExpenseSplitRepository.findByExpense_Group_Id(5L)).thenReturn(List.of(split));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(categoryRepository.findByIdAndIsActiveTrue(21L)).thenReturn(Optional.of(category));
+        when(transactionRepository.save(any(PersonalTransaction.class))).thenAnswer(invocation -> {
+            PersonalTransaction item = invocation.getArgument(0);
+            item.setId(61L);
+            return item;
+        });
+
+        var response = service.syncGroupExpense(7L, 5L, syncRequest(11L, 21L));
+
+        assertEquals(BigDecimal.valueOf(750_000), wallet.getBalance());
+        assertEquals(BigDecimal.valueOf(250_000), response.getAmount());
+        assertEquals(5L, response.getSourceGroupId());
+        verify(walletRepository, times(1)).save(wallet);
+    }
+
+    @Test
+    void repeatedGroupSyncReturnsExistingTransactionWithoutChangingBalance() {
+        User user = User.builder().id(7L).build();
+        PersonalWallet wallet = wallet(11L, user, 750_000);
+        PersonalCategory category = category(21L, PersonalTransactionType.EXPENSE);
+        ExpenseGroup group = ExpenseGroup.builder().id(5L).name("Trip").createdBy(user).build();
+        GroupMember member = GroupMember.builder().id(31L).group(group).user(user).name("An").build();
+        GroupExpense expense = GroupExpense.builder().id(41L).group(group).paidBy(member).build();
+        GroupExpenseSplit split = GroupExpenseSplit.builder()
+                .id(51L)
+                .expense(expense)
+                .member(member)
+                .splitAmount(BigDecimal.valueOf(250_000))
+                .build();
+        PersonalTransaction existing = transaction(
+                61L, user, wallet, category, PersonalTransactionType.EXPENSE, 250_000
+        );
+        existing.setSourceGroupId(5L);
+        when(groupAuthorizationService.requireMemberForUpdate(5L, 7L)).thenReturn(member);
+        when(transactionRepository.findByUserIdAndSourceGroupIdForUpdate(7L, 5L))
+                .thenReturn(Optional.of(existing));
+        when(groupExpenseSplitRepository.findByExpense_Group_Id(5L)).thenReturn(List.of(split));
+        when(walletRepository.findOwnedForUpdate(11L, 7L)).thenReturn(Optional.of(wallet));
+        when(categoryRepository.findByIdAndIsActiveTrue(21L)).thenReturn(Optional.of(category));
+
+        var response = service.syncGroupExpense(7L, 5L, syncRequest(11L, 21L));
+
+        assertEquals(61L, response.getTransactionId());
+        assertEquals(BigDecimal.valueOf(750_000), wallet.getBalance());
+        verify(walletRepository, never()).save(any());
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void repeatedGroupSyncAppliesOnlyLatestAmountDifference() {
+        User user = User.builder().id(7L).build();
+        PersonalWallet wallet = wallet(11L, user, 750_000);
+        PersonalCategory category = category(21L, PersonalTransactionType.EXPENSE);
+        ExpenseGroup group = ExpenseGroup.builder().id(5L).name("Trip").createdBy(user).build();
+        GroupMember member = GroupMember.builder().id(31L).group(group).user(user).name("An").build();
+        GroupExpense expense = GroupExpense.builder().id(41L).group(group).paidBy(member).build();
+        GroupExpenseSplit changedSplit = GroupExpenseSplit.builder()
+                .id(51L)
+                .expense(expense)
+                .member(member)
+                .splitAmount(BigDecimal.valueOf(300_000))
+                .build();
+        PersonalTransaction existing = transaction(
+                61L, user, wallet, category, PersonalTransactionType.EXPENSE, 250_000
+        );
+        existing.setSourceGroupId(5L);
+
+        when(groupAuthorizationService.requireMemberForUpdate(5L, 7L)).thenReturn(member);
+        when(transactionRepository.findByUserIdAndSourceGroupIdForUpdate(7L, 5L))
+                .thenReturn(Optional.of(existing));
+        when(groupExpenseSplitRepository.findByExpense_Group_Id(5L)).thenReturn(List.of(changedSplit));
+        when(walletRepository.findOwnedForUpdate(11L, 7L)).thenReturn(Optional.of(wallet));
+        when(categoryRepository.findByIdAndIsActiveTrue(21L)).thenReturn(Optional.of(category));
+        when(transactionRepository.save(existing)).thenReturn(existing);
+
+        var response = service.syncGroupExpense(7L, 5L, syncRequest(11L, 21L));
+
+        assertEquals(BigDecimal.valueOf(700_000), wallet.getBalance());
+        assertEquals(BigDecimal.valueOf(300_000), response.getAmount());
+        verify(walletRepository).saveAll(any());
+        verify(transactionRepository).save(existing);
+    }
+
+    private SyncGroupExpenseRequest syncRequest(Long walletId, Long categoryId) {
+        SyncGroupExpenseRequest request = new SyncGroupExpenseRequest();
+        request.setWalletId(walletId);
+        request.setCategoryId(categoryId);
+        return request;
     }
 
     private PersonalTransactionRequest request(

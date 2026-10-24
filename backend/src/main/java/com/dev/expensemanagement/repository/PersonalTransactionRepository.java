@@ -16,6 +16,14 @@ import java.util.Optional;
 import jakarta.persistence.LockModeType;
 
 public interface PersonalTransactionRepository extends JpaRepository<PersonalTransaction, Long> {
+    Optional<PersonalTransaction> findByUser_IdAndSourceGroupId(Long userId, Long sourceGroupId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from PersonalTransaction t where t.user.id = :userId and t.sourceGroupId = :sourceGroupId")
+    Optional<PersonalTransaction> findByUserIdAndSourceGroupIdForUpdate(
+            @Param("userId") Long userId,
+            @Param("sourceGroupId") Long sourceGroupId
+    );
     Optional<PersonalTransaction> findByIdAndUser_Id(Long id, Long userId);
     boolean existsByWallet_Id(Long walletId);
 

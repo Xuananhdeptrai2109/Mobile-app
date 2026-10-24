@@ -13,7 +13,8 @@ data class ExpenseGroup(
     val totalExpense: Long = 0,
     val members: List<GroupMember> = emptyList(),
     val expenses: List<GroupExpense> = emptyList(),
-    val tasks: List<GroupTask> = emptyList()
+    val tasks: List<GroupTask> = emptyList(),
+    val settlements: List<GroupSettlement> = emptyList()
 ) {
     val memberCount: Int get() = members.size
     val progress: Float get() = if (budget > 0) totalExpense.toFloat() / budget else 0f
@@ -86,4 +87,14 @@ data class MemberStats(
     val totalPaid: Long,
     val totalOwed: Long,
     val balance: Long
+)
+
+data class GroupSettlement(
+    val id: String,
+    val fromMemberId: String,
+    val fromMemberName: String,
+    val toMemberId: String,
+    val toMemberName: String,
+    val amount: Long,
+    val settledAt: String
 )

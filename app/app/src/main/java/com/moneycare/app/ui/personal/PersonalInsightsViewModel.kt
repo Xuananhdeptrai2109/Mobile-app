@@ -2,9 +2,12 @@ package com.moneycare.app.ui.personal
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.SavingsGoal
 import com.moneycare.app.data.model.personal.*
 import com.moneycare.app.data.repository.PersonalFinanceRepository
+import com.moneycare.app.ui.state.LoadState
+import com.moneycare.app.ui.state.resolveLoadState
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.flow.*
@@ -18,10 +21,21 @@ data class PersonalInsightsUiState(
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null
-)
+) {
+    val goalsContentState: LoadState<List<SavingsGoal>>
+        get() = resolveLoadState(isLoading, goals, errorMessage)
+
+    val statisticsContentState: LoadState<PersonalStatisticsResponse>
+        get() = when {
+            isLoading && statistics == null -> LoadState.Loading
+            errorMessage != null && statistics == null -> LoadState.Error(errorMessage)
+            statistics == null -> LoadState.Empty
+            else -> LoadState.Success(statistics)
+        }
+}
 
 class PersonalInsightsViewModel(
-    private val repository: PersonalFinanceRepository = PersonalFinanceRepository()
+    private val repository: PersonalFinanceRepository = MoneyCareApp.instance.container.personalFinanceRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(PersonalInsightsUiState())
     val uiState: StateFlow<PersonalInsightsUiState> = _uiState.asStateFlow()

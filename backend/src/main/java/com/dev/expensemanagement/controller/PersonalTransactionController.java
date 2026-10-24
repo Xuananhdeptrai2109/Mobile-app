@@ -1,6 +1,7 @@
 package com.dev.expensemanagement.controller;
 
 import com.dev.expensemanagement.dto.request.PersonalTransactionRequest;
+import com.dev.expensemanagement.dto.request.SyncGroupExpenseRequest;
 import com.dev.expensemanagement.dto.response.PagedResponse;
 import com.dev.expensemanagement.dto.response.PersonalDashboardResponse;
 import com.dev.expensemanagement.dto.response.PersonalTransactionResponse;
@@ -62,6 +63,18 @@ public class PersonalTransactionController {
     ) {
         return ResponseEntity.status(HttpStatus.CREATED).body(transactionService.createTransaction(
                 currentUserService.requireUserId(),
+                request
+        ));
+    }
+
+    @PostMapping("/groups/{groupId}/sync-personal")
+    public ResponseEntity<PersonalTransactionResponse> syncGroupExpense(
+            @PathVariable Long groupId,
+            @Valid @RequestBody SyncGroupExpenseRequest request
+    ) {
+        return ResponseEntity.ok(transactionService.syncGroupExpense(
+                currentUserService.requireUserId(),
+                groupId,
                 request
         ));
     }

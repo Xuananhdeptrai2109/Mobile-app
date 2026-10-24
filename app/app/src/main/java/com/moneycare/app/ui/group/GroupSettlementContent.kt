@@ -1,6 +1,5 @@
 package com.moneycare.app.ui.group
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,16 +13,16 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneycare.app.data.model.ExpenseGroup
 import com.moneycare.app.data.model.personal.WalletResponse
-import com.moneycare.app.data.repository.PersonalFinanceRepository
+import com.moneycare.app.data.model.personal.PersonalCategoryResponse
 import com.moneycare.app.ui.theme.DarkGreen
 import com.moneycare.app.ui.theme.LightGreen
 import com.moneycare.app.ui.theme.PrimaryGreen
@@ -33,18 +32,19 @@ import com.moneycare.app.ui.theme.TextSecondary
 import com.moneycare.app.util.DebtSimplifier
 import com.moneycare.app.util.SettlementTransaction
 import com.moneycare.app.util.toVnd
-import kotlinx.coroutines.launch
 
 @Composable
 fun GroupSettlementContent(
     group: ExpenseGroup,
-    onSettleDebt: (String, String) -> Unit,
-    onSyncToWallet: (walletId: Long, categoryId: Long, amount: Long) -> Unit,
+    onSettleDebt: (String, String, Long) -> Unit,
+    onSyncToWallet: (walletId: Long, categoryId: Long) -> Unit,
+    wallets: List<WalletResponse>,
+    categories: List<PersonalCategoryResponse>,
+    isLoadingSyncOptions: Boolean,
+    onLoadSyncOptions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val netBalances = remember(group.expenses, group.members) {
+    val netBalances = remember(group.expenses, group.members, group.settlements) {
         DebtSimplifier.calculateNetBalances(group)
     }
     val simplifiedSettlements = remember(netBalances, group.members) {
@@ -64,11 +64,16 @@ fun GroupSettlementContent(
         } ?: 0L
     }
 
-    var showSyncDialog by remember { mutableStateOf(false) }
-    var availableWallets by remember { mutableStateOf<List<WalletResponse>>(emptyList()) }
-    var selectedWalletId by remember { mutableStateOf<Long?>(null) }
-    var defaultCategoryId by remember { mutableStateOf<Long?>(null) }
-    var isLoadingWallets by remember { mutableStateOf(false) }
+    var showSyncDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedWalletId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val defaultCategoryId = remember(categories) { categories.firstOrNull()?.categoryId }
+
+    LaunchedEffect(wallets) {
+        if (selectedWalletId == null || wallets.none { it.walletId == selectedWalletId }) {
+            selectedWalletId = wallets.firstOrNull { it.isDefault }?.walletId
+                ?: wallets.firstOrNull()?.walletId
+        }
+    }
 
     // Dialog Đồng bộ vào ví cá nhân
     if (showSyncDialog) {
@@ -106,12 +111,12 @@ fun GroupSettlementContent(
                         }
                     }
 
-                    if (isLoadingWallets) {
+                    if (isLoadingSyncOptions) {
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally).padding(8.dp))
-                    } else if (availableWallets.isNotEmpty()) {
+                    } else if (wallets.isNotEmpty()) {
                         Text("Chọn ví ghi nhận khoản trừ:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            availableWallets.forEach { wallet ->
+                            wallets.forEach { wallet ->
                                 Surface(
                                     onClick = { selectedWalletId = wallet.walletId },
                                     shape = RoundedCornerShape(10.dp),
@@ -130,21 +135,36 @@ fun GroupSettlementContent(
                                 }
                             }
                         }
+                        if (categories.isEmpty()) {
+                            Text(
+                                "Không có danh mục chi tiêu để đồng bộ.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            TextButton(onClick = onLoadSyncOptions) { Text("Thử lại") }
+                        }
+                    } else {
+                        Text(
+                            "Không tải được ví cá nhân hoặc tài khoản chưa có ví.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        TextButton(onClick = onLoadSyncOptions) { Text("Thử lại") }
                     }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val walletId = selectedWalletId ?: availableWallets.firstOrNull()?.walletId
+                        val walletId = selectedWalletId ?: wallets.firstOrNull()?.walletId
                         if (walletId != null) {
-                            val catId = defaultCategoryId ?: 1L
-                            onSyncToWallet(walletId, catId, myTotalSpent)
-                            showSyncDialog = false
-                            Toast.makeText(context, "✨ Đã đồng bộ ${myTotalSpent.toVnd()} vào ví cá nhân!", Toast.LENGTH_SHORT).show()
+                            defaultCategoryId?.let { categoryId ->
+                                onSyncToWallet(walletId, categoryId)
+                                showSyncDialog = false
+                            }
                         }
                     },
-                    enabled = myTotalSpent > 0L && selectedWalletId != null,
+                    enabled = myTotalSpent > 0L && selectedWalletId != null && defaultCategoryId != null,
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen)
                 ) {
                     Text("Đồng bộ ngay")
@@ -195,19 +215,8 @@ fun GroupSettlementContent(
 
                     Button(
                         onClick = {
-                            coroutineScope.launch {
-                                isLoadingWallets = true
-                                showSyncDialog = true
-                                runCatching {
-                                    val repo = PersonalFinanceRepository()
-                                    val wallets = repo.getWallets()
-                                    val categories = repo.getCategories()
-                                    availableWallets = wallets
-                                    selectedWalletId = wallets.firstOrNull { it.isDefault }?.walletId ?: wallets.firstOrNull()?.walletId
-                                    defaultCategoryId = categories.firstOrNull()?.categoryId
-                                }
-                                isLoadingWallets = false
-                            }
+                            showSyncDialog = true
+                            onLoadSyncOptions()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen),
                         shape = RoundedCornerShape(12.dp),
@@ -268,8 +277,7 @@ fun GroupSettlementContent(
                 SettlementCard(
                     settle = settle,
                     onSettleClick = {
-                        onSettleDebt(settle.fromMemberId, settle.toMemberId)
-                        Toast.makeText(context, "Đã đánh dấu ${settle.fromMemberName} đã trả cho ${settle.toMemberName}", Toast.LENGTH_SHORT).show()
+                        onSettleDebt(settle.fromMemberId, settle.toMemberId, settle.amount)
                     }
                 )
             }

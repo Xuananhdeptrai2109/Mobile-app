@@ -50,6 +50,9 @@ public class PersonalTransaction {
     @Column(length = 1000)
     private String receiptImageUrl;
 
+    @Column(name = "source_group_id")
+    private Long sourceGroupId;
+
     @Column(nullable = false)
     private LocalDateTime transactionTime;
 

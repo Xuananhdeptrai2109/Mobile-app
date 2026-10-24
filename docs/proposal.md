@@ -37,6 +37,8 @@
 | Debt simplification algorithm (Settlement tab — thuật toán tham lam tối giản số lượt chuyển tiền) | | |
 | Sync group expense into personal wallet (đồng bộ chi phí nhóm vào ví cá nhân tự động) | | |
 
+The receipt/audio extraction code added later is an experimental extension requiring a backend `GEMINI_API_KEY`; it is not part of the required M3 scope or the offline acceptance criteria.
+
 ## 5. Users & Key Challenge
 
 - **Target users:** Travelers, flatmates, students on a budget. They use the app on the go, right after buying a coffee or paying for a taxi.
@@ -54,7 +56,7 @@
 - **Data:** 
   - Entities: `User`, `Wallet`, `Category`, `Transaction`, `Goal`, `Group`, `GroupMember`, `Expense`, `ExpenseSplit`.
   - Source: Local SQLite (Room DB) for personal data, Mock API/Backend for trip data (to share with other users).
-- **Offline:** Personal transactions, wallet balances, and saving goals must be 100% available without network.
+- **Offline implementation scope (M3 decision):** the latest dashboard, personal transactions and wallets remain readable without network through a per-user Room cache. Writes and saving goals remain online-only so the Spring API stays the source of truth.
 
 ## 7. Alternatives Considered
 
@@ -76,7 +78,7 @@
 | Risk | Mitigation |
 |------|------------|
 | Debt simplification algorithm is too complex to implement correctly. | Start with equal splits first. Research and adapt open-source graph/greedy algorithms for debt simplification. |
-| Handling offline/online sync conflicts for group trips. | For M3, make group trips online-first (require network to sync bills), while keeping personal tracking strictly offline-first. |
+| Handling offline/online sync conflicts for group trips. | For M3, keep group trips and all writes online-first, while supporting cached offline reads for dashboard, personal transactions and wallets. This narrower scope avoids silently overwriting server data. |
 
 ## 10. Instructor Feedback
 

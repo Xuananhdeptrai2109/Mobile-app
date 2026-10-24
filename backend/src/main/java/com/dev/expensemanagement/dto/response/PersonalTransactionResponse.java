@@ -26,6 +26,7 @@ public class PersonalTransactionResponse {
     private String walletName;
     private String note;
     private String receiptImageUrl;
+    private Long sourceGroupId;
     private LocalDateTime transactionTime;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

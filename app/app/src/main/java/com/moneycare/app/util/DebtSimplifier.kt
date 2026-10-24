@@ -42,6 +42,14 @@ object DebtSimplifier {
                 }
             }
         }
+        // A settlement is separate from the original expense splits. Paying moves
+        // the debtor and creditor balances toward zero without rewriting history.
+        for (settlement in group.settlements) {
+            balances[settlement.fromMemberId] =
+                (balances[settlement.fromMemberId] ?: 0L) + settlement.amount
+            balances[settlement.toMemberId] =
+                (balances[settlement.toMemberId] ?: 0L) - settlement.amount
+        }
         return balances
     }
 

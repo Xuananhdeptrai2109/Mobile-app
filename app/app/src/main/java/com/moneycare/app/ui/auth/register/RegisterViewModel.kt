@@ -3,8 +3,8 @@ package com.moneycare.app.ui.auth.register
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moneycare.app.MoneyCareApp
-import com.moneycare.app.data.api.RetrofitClient
 import com.moneycare.app.data.model.auth.RegisterRequest
+import com.moneycare.app.data.repository.AuthRepository
 import com.moneycare.app.ui.components.SocialProvider
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -14,7 +14,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class RegisterViewModel : ViewModel() {
+class RegisterViewModel(
+    private val authRepository: AuthRepository = MoneyCareApp.instance.container.authRepository
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RegisterUiState())
     val uiState: StateFlow<RegisterUiState> = _uiState
@@ -69,7 +71,7 @@ class RegisterViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, generalError = null) }
             try {
-                val response = RetrofitClient.apiService.register(
+                authRepository.register(
                     RegisterRequest(
                         fullName = state.fullName,
                         email = state.email,
@@ -79,31 +81,15 @@ class RegisterViewModel : ViewModel() {
                     )
                 )
 
-                val token = response.token
-                val userId = response.userId
-                if (response.success && token != null && userId != null) {
-                    // Save session
-                    MoneyCareApp.instance.sessionManager.saveSession(
-                        token = token,
-                        userId = userId,
-                        userName = response.fullName ?: ""
-                    )
-                    _uiState.update { it.copy(isLoading = false, registerSuccess = true) }
-                    delay(1400)
-                    _effect.send(RegisterUiEffect.NavigateToHome)
-                } else {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            generalError = response.message ?: "Phản hồi đăng ký không hợp lệ"
-                        )
-                    }
-                }
+                _uiState.update { it.copy(isLoading = false, registerSuccess = true) }
+                delay(1400)
+                _effect.send(RegisterUiEffect.NavigateToHome)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        generalError = "Không thể kết nối tới server. Vui lòng thử lại sau! 🥲"
+                        generalError = e.localizedMessage
+                            ?: "Không thể kết nối tới server. Vui lòng thử lại sau! 🥲"
                     )
                 }
             }

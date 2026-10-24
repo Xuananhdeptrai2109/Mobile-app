@@ -7,12 +7,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.moneycare.app.data.model.SavingsGoal
 import com.moneycare.app.data.model.personal.SavingsOperation
 import com.moneycare.app.ui.components.*
+import com.moneycare.app.ui.state.LoadState
 import com.moneycare.app.ui.theme.ExpenseRed
 import java.text.NumberFormat
 import java.time.LocalDate
@@ -29,13 +31,18 @@ fun SavingsGoalsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    var selectedGoal by remember { mutableStateOf<SavingsGoal?>(null) }
-    var activeDialog by remember { mutableStateOf<GoalDialog?>(null) }
-    var contributionOperation by remember { mutableStateOf(SavingsOperation.DEPOSIT) }
+    var selectedGoalId by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeDialogName by rememberSaveable { mutableStateOf<String?>(null) }
+    var contributionOperationName by rememberSaveable {
+        mutableStateOf(SavingsOperation.DEPOSIT.name)
+    }
+    val selectedGoal = state.goals.firstOrNull { it.id == selectedGoalId }
+    val activeDialog = activeDialogName?.let(GoalDialog::valueOf)
+    val contributionOperation = SavingsOperation.valueOf(contributionOperationName)
 
     LaunchedEffect(Unit) { viewModel.loadGoals() }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.goals.isNotEmpty()) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -45,53 +52,53 @@ fun SavingsGoalsScreen(
         GoalDialog.FORM -> GoalFormDialog(
             goal = selectedGoal,
             isSaving = state.isSaving,
-            onDismiss = { activeDialog = null },
+            onDismiss = { activeDialogName = null },
             onSave = { title, emoji, target, targetDate ->
                 viewModel.saveGoal(
                     selectedGoal?.id?.toLongOrNull(), title, emoji, target, targetDate
-                ) { activeDialog = null }
+                ) { activeDialogName = null }
             }
         )
         GoalDialog.ACTIONS -> selectedGoal?.let { goal ->
             GoalActionsDialog(
                 goal = goal,
-                onDismiss = { activeDialog = null },
+                onDismiss = { activeDialogName = null },
                 onDeposit = {
-                    contributionOperation = SavingsOperation.DEPOSIT
-                    activeDialog = GoalDialog.CONTRIBUTION
+                    contributionOperationName = SavingsOperation.DEPOSIT.name
+                    activeDialogName = GoalDialog.CONTRIBUTION.name
                 },
                 onWithdraw = {
-                    contributionOperation = SavingsOperation.WITHDRAW
-                    activeDialog = GoalDialog.CONTRIBUTION
+                    contributionOperationName = SavingsOperation.WITHDRAW.name
+                    activeDialogName = GoalDialog.CONTRIBUTION.name
                 },
-                onEdit = { activeDialog = GoalDialog.FORM },
-                onDelete = { activeDialog = GoalDialog.DELETE }
+                onEdit = { activeDialogName = GoalDialog.FORM.name },
+                onDelete = { activeDialogName = GoalDialog.DELETE.name }
             )
         }
         GoalDialog.CONTRIBUTION -> selectedGoal?.let { goal ->
             ContributionDialog(
                 operation = contributionOperation,
                 isSaving = state.isSaving,
-                onDismiss = { activeDialog = GoalDialog.ACTIONS },
+                onDismiss = { activeDialogName = GoalDialog.ACTIONS.name },
                 onConfirm = { amount ->
                     viewModel.contribute(goal.id.toLong(), amount, contributionOperation) {
-                        activeDialog = null
+                        activeDialogName = null
                     }
                 }
             )
         }
         GoalDialog.DELETE -> selectedGoal?.let { goal ->
             AlertDialog(
-                onDismissRequest = { activeDialog = GoalDialog.ACTIONS },
+                onDismissRequest = { activeDialogName = GoalDialog.ACTIONS.name },
                 title = { Text("Xóa mục tiêu?") },
                 text = { Text("Toàn bộ tiến độ của “${goal.title}” sẽ bị xóa.") },
                 confirmButton = {
                     TextButton(
-                        onClick = { viewModel.deleteGoal(goal.id.toLong()) { activeDialog = null } },
+                        onClick = { viewModel.deleteGoal(goal.id.toLong()) { activeDialogName = null } },
                         enabled = !state.isSaving
                     ) { Text("Xóa", color = ExpenseRed) }
                 },
-                dismissButton = { TextButton(onClick = { activeDialog = GoalDialog.ACTIONS }) { Text("Hủy") } }
+                dismissButton = { TextButton(onClick = { activeDialogName = GoalDialog.ACTIONS.name }) { Text("Hủy") } }
             )
         }
         null -> Unit
@@ -102,8 +109,8 @@ fun SavingsGoalsScreen(
         topBar = { GroupDetailTopBar("Mục tiêu tiết kiệm", onBackClick) },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                selectedGoal = null
-                activeDialog = GoalDialog.FORM
+                selectedGoalId = null
+                activeDialogName = GoalDialog.FORM.name
             }) { Icon(Icons.Filled.Add, contentDescription = "Thêm mục tiêu") }
         }
     ) { padding ->
@@ -114,11 +121,15 @@ fun SavingsGoalsScreen(
                 label = { Text("Hiện mục tiêu đã hoàn thành") },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
             )
-            when {
-                state.isLoading && state.goals.isEmpty() -> Box(
+            when (val content = state.goalsContentState) {
+                LoadState.Loading -> Box(
                     Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center
                 ) { CircularProgressIndicator() }
-                state.goals.isEmpty() -> Box(
+                is LoadState.Error -> ErrorRetryContent(
+                    message = content.message,
+                    onRetry = viewModel::loadGoals
+                )
+                LoadState.Empty -> Box(
                     Modifier.fillMaxSize().padding(32.dp),
                     contentAlignment = androidx.compose.ui.Alignment.Center
                 ) {
@@ -128,13 +139,13 @@ fun SavingsGoalsScreen(
                         Text("Nhấn + để tạo mục tiêu đầu tiên", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                is LoadState.Success -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(state.goals, key = { it.id }) { goal ->
                         SavingsGoalCard(
                             goal = goal,
                             onClick = {
-                                selectedGoal = goal
-                                activeDialog = GoalDialog.ACTIONS
+                                selectedGoalId = goal.id
+                                activeDialogName = GoalDialog.ACTIONS.name
                             }
                         )
                     }
@@ -151,10 +162,10 @@ private fun GoalFormDialog(
     onDismiss: () -> Unit,
     onSave: (String, String, Long, String?) -> Unit
 ) {
-    var title by remember(goal?.id) { mutableStateOf(goal?.title.orEmpty()) }
-    var emoji by remember(goal?.id) { mutableStateOf(goal?.emoji ?: "🎯") }
-    var target by remember(goal?.id) { mutableLongStateOf(goal?.targetAmount ?: 0) }
-    var targetDate by remember(goal?.id) { mutableStateOf(goal?.targetDate.orEmpty()) }
+    var title by rememberSaveable(goal?.id) { mutableStateOf(goal?.title.orEmpty()) }
+    var emoji by rememberSaveable(goal?.id) { mutableStateOf(goal?.emoji ?: "🎯") }
+    var target by rememberSaveable(goal?.id) { mutableLongStateOf(goal?.targetAmount ?: 0) }
+    var targetDate by rememberSaveable(goal?.id) { mutableStateOf(goal?.targetDate.orEmpty()) }
     val validDate = targetDate.isBlank() || try {
         LocalDate.parse(targetDate)
         true
@@ -247,7 +258,7 @@ private fun ContributionDialog(
     onDismiss: () -> Unit,
     onConfirm: (Long) -> Unit
 ) {
-    var amount by remember(operation) { mutableLongStateOf(0) }
+    var amount by rememberSaveable(operation) { mutableLongStateOf(0) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (operation == SavingsOperation.DEPOSIT) "Nạp vào mục tiêu" else "Rút khỏi mục tiêu") },

@@ -2,12 +2,15 @@ package com.moneycare.app.ui.personal
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.Transaction
 import com.moneycare.app.data.model.TransactionType
 import com.moneycare.app.data.model.personal.PersonalCategoryResponse
 import com.moneycare.app.data.model.personal.PersonalTransactionRequest
 import com.moneycare.app.data.model.personal.WalletResponse
 import com.moneycare.app.data.repository.PersonalFinanceRepository
+import com.moneycare.app.ui.state.LoadState
+import com.moneycare.app.ui.state.resolveLoadState
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -33,10 +36,21 @@ data class PersonalTransactionUiState(
     val isLoadingMore: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null
-)
+) {
+    val contentState: LoadState<List<Transaction>>
+        get() = resolveLoadState(isLoading, transactions, errorMessage)
+
+    val detailState: LoadState<Transaction>
+        get() = when {
+            isLoading && selectedTransaction == null -> LoadState.Loading
+            errorMessage != null && selectedTransaction == null -> LoadState.Error(errorMessage)
+            selectedTransaction == null -> LoadState.Empty
+            else -> LoadState.Success(selectedTransaction)
+        }
+}
 
 class PersonalTransactionViewModel(
-    private val repository: PersonalFinanceRepository = PersonalFinanceRepository()
+    private val repository: PersonalFinanceRepository = MoneyCareApp.instance.container.personalFinanceRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(PersonalTransactionUiState())
     val uiState: StateFlow<PersonalTransactionUiState> = _uiState.asStateFlow()

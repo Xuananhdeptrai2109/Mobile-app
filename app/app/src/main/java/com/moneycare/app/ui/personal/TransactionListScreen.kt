@@ -45,6 +45,8 @@ import com.moneycare.app.data.model.TransactionType
 import com.moneycare.app.ui.components.AppBottomNavigation
 import com.moneycare.app.ui.components.BottomNavItem
 import com.moneycare.app.ui.components.TransactionItem
+import com.moneycare.app.ui.components.ErrorRetryContent
+import com.moneycare.app.ui.state.LoadState
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +64,7 @@ fun TransactionListScreen(
 
     LaunchedEffect(Unit) { viewModel.loadInitialData() }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.transactions.isNotEmpty()) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -182,17 +184,21 @@ fun TransactionListScreen(
                 }
             }
 
-            when {
-                state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when (val content = state.contentState) {
+                LoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                state.transactions.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                is LoadState.Error -> ErrorRetryContent(
+                    message = content.message,
+                    onRetry = viewModel::refresh
+                )
+                LoadState.Empty -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.ReceiptLong, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
                         Text("Chưa có giao dịch trong tháng này", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                is LoadState.Success -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                     item {
                         Text(
                             "${state.totalElements} giao dịch",

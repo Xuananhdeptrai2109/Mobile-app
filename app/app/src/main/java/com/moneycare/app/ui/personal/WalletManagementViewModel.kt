@@ -2,8 +2,11 @@ package com.moneycare.app.ui.personal
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.personal.WalletResponse
 import com.moneycare.app.data.repository.PersonalFinanceRepository
+import com.moneycare.app.ui.state.LoadState
+import com.moneycare.app.ui.state.resolveLoadState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,10 +21,13 @@ data class WalletManagementUiState(
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null
-)
+) {
+    val contentState: LoadState<List<WalletResponse>>
+        get() = resolveLoadState(isLoading, wallets, errorMessage)
+}
 
 class WalletManagementViewModel(
-    private val repository: PersonalFinanceRepository = PersonalFinanceRepository()
+    private val repository: PersonalFinanceRepository = MoneyCareApp.instance.container.personalFinanceRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(WalletManagementUiState())
     val uiState: StateFlow<WalletManagementUiState> = _uiState.asStateFlow()

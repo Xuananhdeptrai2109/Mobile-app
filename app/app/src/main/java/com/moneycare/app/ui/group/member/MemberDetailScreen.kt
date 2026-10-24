@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,12 +28,14 @@ import com.moneycare.app.ui.theme.PrimaryGreen
 import com.moneycare.app.ui.theme.ScreenBackground
 import com.moneycare.app.ui.group.ConfirmGroupActionDialog
 import com.moneycare.app.ui.group.EditMemberDialog
+import com.moneycare.app.ui.group.GroupRouteStateScreen
 import com.moneycare.app.util.formatVnd
 import com.moneycare.app.viewmodel.GroupDetailViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemberDetailScreen(
+    groupId: String,
     memberId: String,
     onBackClick: () -> Unit,
     viewModel: GroupDetailViewModel,
@@ -41,15 +44,29 @@ fun MemberDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showEditDialog by remember { mutableStateOf(false) }
-    var showRemoveConfirmation by remember { mutableStateOf(false) }
+    var showEditDialog by rememberSaveable { mutableStateOf(false) }
+    var showRemoveConfirmation by rememberSaveable { mutableStateOf(false) }
     
-    LaunchedEffect(memberId) {
-        viewModel.loadMemberDetail(memberId)
+    LaunchedEffect(groupId) {
+        viewModel.ensureGroupLoaded(groupId)
     }
-    
-    val member = uiState.selectedMember ?: return
-    val stats = uiState.memberStats ?: return
+
+    LaunchedEffect(groupId, memberId, uiState.group) {
+        if (uiState.group?.id == groupId) viewModel.loadMemberDetail(memberId)
+    }
+
+    val member = uiState.selectedMember?.takeIf { it.id == memberId }
+    val stats = uiState.memberStats
+    if (member == null || stats == null) {
+        GroupRouteStateScreen(
+            title = "Chi tiết thành viên",
+            errorMessage = uiState.errorMessage,
+            onRetry = { viewModel.loadGroup(groupId) },
+            onBackClick = onBackClick,
+            modifier = modifier
+        )
+        return
+    }
     val currentUserIsOwner = uiState.group?.members?.any {
         it.isCurrentUser && it.role.equals("OWNER", ignoreCase = true)
     } == true

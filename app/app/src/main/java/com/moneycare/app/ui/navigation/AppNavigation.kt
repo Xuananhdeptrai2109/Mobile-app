@@ -341,14 +341,20 @@ fun AppNavigation(
                 groupId = groupId,
                 initialTab = initialTab,
                 onBackClick = { navController.popBackStack() },
-                onNavigateToAddExpense = { navController.navigate(MoneyCareRoutes.ADD_EXPENSE) },
-                onNavigateToAddTask = { id -> navController.navigate(MoneyCareRoutes.ADD_TASK) },
-                onNavigateToEditTask = { taskId -> navController.navigate("${MoneyCareRoutes.ADD_TASK}?taskId=$taskId") },
-                onNavigateToMemberDetail = { memberId -> 
-                    navController.navigate("${MoneyCareRoutes.MEMBER_DETAIL}/$memberId")
+                onNavigateToAddExpense = { id ->
+                    navController.navigate("${MoneyCareRoutes.ADD_EXPENSE}/$id")
+                },
+                onNavigateToAddTask = { id ->
+                    navController.navigate("${MoneyCareRoutes.ADD_TASK}/$id")
+                },
+                onNavigateToEditTask = { taskId ->
+                    navController.navigate("${MoneyCareRoutes.ADD_TASK}/$groupId?taskId=$taskId")
+                },
+                onNavigateToMemberDetail = { memberId ->
+                    navController.navigate("${MoneyCareRoutes.MEMBER_DETAIL}/$groupId/$memberId")
                 },
                 onNavigateToExpenseDetail = { expenseId ->
-                    navController.navigate("${MoneyCareRoutes.EXPENSE_DETAIL}/$expenseId")
+                    navController.navigate("${MoneyCareRoutes.EXPENSE_DETAIL}/$groupId/$expenseId")
                 },
                 onNavigateToReport = { id -> navController.navigate("${MoneyCareRoutes.GROUP_REPORT}/$id") },
                 viewModel = groupViewModel
@@ -366,14 +372,18 @@ fun AppNavigation(
         }
 
         composable(
-            route = "${MoneyCareRoutes.ADD_EXPENSE}?expenseId={expenseId}",
-            arguments = listOf(navArgument("expenseId") {
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            })
+            route = "${MoneyCareRoutes.ADD_EXPENSE}/{groupId}?expenseId={expenseId}",
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+                navArgument("expenseId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
         ) { backStackEntry ->
             AddExpenseScreen(
+                groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable,
                 expenseId = backStackEntry.arguments?.getString("expenseId"),
                 onBackClick = { navController.popBackStack() },
                 viewModel = groupViewModel
@@ -381,26 +391,35 @@ fun AppNavigation(
         }
 
         composable(
-            route = "${MoneyCareRoutes.EXPENSE_DETAIL}/{expenseId}",
-            arguments = listOf(navArgument("expenseId") { type = NavType.StringType })
+            route = "${MoneyCareRoutes.EXPENSE_DETAIL}/{groupId}/{expenseId}",
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+                navArgument("expenseId") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
+            val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
             val expenseId = backStackEntry.arguments?.getString("expenseId") ?: ""
             ExpenseDetailScreen(
+                groupId = groupId,
                 expenseId = expenseId,
                 onBackClick = { navController.popBackStack() },
                 onEditClick = { id ->
-                    navController.navigate("${MoneyCareRoutes.ADD_EXPENSE}?expenseId=$id")
+                    navController.navigate("${MoneyCareRoutes.ADD_EXPENSE}/$groupId?expenseId=$id")
                 },
                 viewModel = groupViewModel
             )
         }
 
         composable(
-            route = "${MoneyCareRoutes.MEMBER_DETAIL}/{memberId}",
-            arguments = listOf(navArgument("memberId") { type = NavType.StringType })
+            route = "${MoneyCareRoutes.MEMBER_DETAIL}/{groupId}/{memberId}",
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+                navArgument("memberId") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
             val memberId = backStackEntry.arguments?.getString("memberId") ?: ""
             MemberDetailScreen(
+                groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable,
                 memberId = memberId,
                 onBackClick = { navController.popBackStack() },
                 viewModel = groupViewModel
@@ -408,15 +427,19 @@ fun AppNavigation(
         }
 
         composable(
-            route = "${MoneyCareRoutes.ADD_TASK}?taskId={taskId}",
-            arguments = listOf(navArgument("taskId") { 
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            })
+            route = "${MoneyCareRoutes.ADD_TASK}/{groupId}?taskId={taskId}",
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+                navArgument("taskId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
         ) { backStackEntry ->
             val taskId = backStackEntry.arguments?.getString("taskId")
             AddTaskScreen(
+                groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable,
                 taskId = taskId,
                 onBackClick = { navController.popBackStack() },
                 viewModel = groupViewModel

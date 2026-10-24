@@ -9,11 +9,13 @@ import com.moneycare.app.data.model.ExpenseGroup
 import com.moneycare.app.data.model.GroupExpense
 import com.moneycare.app.data.model.GroupMember
 import com.moneycare.app.data.model.GroupTask
+import com.moneycare.app.data.model.GroupSettlement
 import com.moneycare.app.data.model.ExpenseSplit
 import com.moneycare.app.data.model.ExpenseSplitMethod
 import com.moneycare.app.data.model.group.AddGroupMemberRequest
 import com.moneycare.app.data.model.group.CreateGroupExpenseRequest
 import com.moneycare.app.data.model.group.CreateGroupRequest
+import com.moneycare.app.data.model.group.CreateGroupSettlementRequest
 import com.moneycare.app.data.model.group.CreateGroupTaskRequest
 import com.moneycare.app.data.model.group.GroupActivityResponse
 import com.moneycare.app.data.model.group.GroupExpenseSplitRequest
@@ -56,6 +58,7 @@ class RealGroupRepository(
         val groupResponse = apiService.getGroup(id)
         val expensesResponse = apiService.getGroupExpenses(id)
         val tasksResponse = apiService.getGroupTasks(id)
+        val settlementsResponse = apiService.getGroupSettlements(id)
 
         val currentUserId = getUserId()
         val uiGroup = groupResponse.toUiModel()
@@ -79,7 +82,18 @@ class RealGroupRepository(
             expenses = uiExpenses,
             tasks = uiTasks,
             totalExpense = uiExpenses.sumOf { it.amount },
-            members = markedMembers
+            members = markedMembers,
+            settlements = settlementsResponse.map { response ->
+                GroupSettlement(
+                    id = response.settlementId.toString(),
+                    fromMemberId = response.fromMemberId.toString(),
+                    fromMemberName = response.fromMemberName,
+                    toMemberId = response.toMemberId.toString(),
+                    toMemberName = response.toMemberName,
+                    amount = response.amount,
+                    settledAt = response.settledAt
+                )
+            }
         )
     }
 
@@ -277,6 +291,31 @@ class RealGroupRepository(
         val tId = taskId.toLongOrNull()
         if (gId == null || tId == null) throw IllegalArgumentException("Mã nhóm hoặc nhiệm vụ không hợp lệ")
         apiService.deleteTask(gId, tId)
+    }
+
+    suspend fun settleDebt(
+        groupId: String,
+        fromMemberId: String,
+        toMemberId: String,
+        amount: Long
+    ): GroupSettlement {
+        val response = apiService.createGroupSettlement(
+            requireGroupId(groupId),
+            CreateGroupSettlementRequest(
+                fromMemberId = requireMemberId(fromMemberId),
+                toMemberId = requireMemberId(toMemberId),
+                amount = amount
+            )
+        )
+        return GroupSettlement(
+            id = response.settlementId.toString(),
+            fromMemberId = response.fromMemberId.toString(),
+            fromMemberName = response.fromMemberName,
+            toMemberId = response.toMemberId.toString(),
+            toMemberName = response.toMemberName,
+            amount = response.amount,
+            settledAt = response.settledAt
+        )
     }
 
     suspend fun getGroupActivities(groupId: String): List<GroupActivityResponse> =

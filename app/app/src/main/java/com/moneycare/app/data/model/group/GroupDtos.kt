@@ -64,6 +64,23 @@ data class GroupExpenseSplitRequest(
     val percentage: Double? = null
 )
 
+data class CreateGroupSettlementRequest(
+    val fromMemberId: Long,
+    val toMemberId: Long,
+    val amount: Long
+)
+
+data class GroupSettlementResponse(
+    val settlementId: Long,
+    val groupId: Long,
+    val fromMemberId: Long,
+    val fromMemberName: String,
+    val toMemberId: Long,
+    val toMemberName: String,
+    val amount: Long,
+    val settledAt: String
+)
+
 data class GroupExpenseResponse(
     val expenseId: Long,
     val groupId: Long,

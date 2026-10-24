@@ -2,6 +2,7 @@ package com.moneycare.app.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.ExpenseGroup
 import com.moneycare.app.data.model.GroupTaskSummary
 import com.moneycare.app.data.model.HomeMode
@@ -36,7 +37,7 @@ data class HomeUiState(
 )
 
 class HomeViewModel(
-    private val repository: ExpenseRepository = HybridExpenseRepository()
+    private val repository: ExpenseRepository = MoneyCareApp.instance.container.expenseRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())

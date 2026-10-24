@@ -19,6 +19,12 @@ public class GroupAuthorizationService {
                 .orElseThrow(() -> new AccessDeniedException("Bạn không phải thành viên của nhóm này"));
     }
 
+    /** Serializes operations that must be unique for one user inside one group. */
+    public GroupMember requireMemberForUpdate(Long groupId, Long userId) {
+        return groupMemberRepository.findByGroupIdAndUserIdForUpdate(groupId, userId)
+                .orElseThrow(() -> new AccessDeniedException("Bạn không phải thành viên của nhóm này"));
+    }
+
     public GroupMember requireOwner(Long groupId, Long userId) {
         GroupMember member = requireMember(groupId, userId);
         if (!ROLE_OWNER.equals(member.getRole())) {

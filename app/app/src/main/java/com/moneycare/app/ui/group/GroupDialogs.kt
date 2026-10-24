@@ -12,8 +12,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,9 +28,9 @@ fun EditGroupDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, description: String, budget: Long) -> Unit
 ) {
-    var name by remember(group.id) { mutableStateOf(group.name) }
-    var description by remember(group.id) { mutableStateOf(group.description) }
-    var budget by remember(group.id) { mutableStateOf(group.budget.toString()) }
+    var name by rememberSaveable(group.id) { mutableStateOf(group.name) }
+    var description by rememberSaveable(group.id) { mutableStateOf(group.description) }
+    var budget by rememberSaveable(group.id) { mutableStateOf(group.budget.toString()) }
     val parsedBudget = budget.toLongOrNull()
     val valid = name.isNotBlank() && name.length <= 120 && parsedBudget != null && parsedBudget >= 0
 
@@ -86,7 +86,7 @@ fun EditMemberDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var name by remember(initialName) { mutableStateOf(initialName) }
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text("Sửa tên thành viên") },

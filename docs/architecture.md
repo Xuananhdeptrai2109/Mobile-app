@@ -25,9 +25,9 @@ graph TD
     end
 
     subgraph Data ["Data Layer"]
-        REPO["Repositories (Single Source of Truth)"]
+        REPO["Repositories (data policy)"]
         REMOTE["Remote REST API (Retrofit + OkHttp)"]
-        LOCAL["Local DB (Room SQLite / EncryptedSharedPreferences)"]
+        LOCAL["Room network cache / encrypted session storage"]
         REPO --> REMOTE
         REPO --> LOCAL
     end
@@ -54,24 +54,24 @@ graph TD
 - Loại bỏ hoàn toàn callback phức tạp hoặc biến toàn cục dễ gây memory leak.
 
 ### Chuẩn hóa 4 trạng thái giao diện (4 UI States):
-Mọi màn hình tải dữ liệu bất đồng bộ trong ứng dụng đều được mô hình hóa qua một sealed class/interface đại diện cho 4 trạng thái:
+Các màn hình dữ liệu chính suy ra trạng thái nội dung từ một sealed interface dùng chung:
 
 ```kotlin
-sealed interface UiState<out T> {
-    object Loading : UiState<Nothing>
-    data class Success<T>(val data: T) : UiState<T>
-    object Empty : UiState<Nothing>
-    data class Error(val message: String, val canRetry: Boolean = true) : UiState<Nothing>
+sealed interface LoadState<out T> {
+    data object Loading : LoadState<Nothing>
+    data class Success<T>(val data: T) : LoadState<T>
+    data object Empty : LoadState<Nothing>
+    data class Error(val message: String) : LoadState<Nothing>
 }
 ```
 
 Ở màn hình Jetpack Compose, giao diện được render tường minh:
 ```kotlin
-when (val state = uiState) {
-    is UiState.Loading -> LoadingSkeleton()
-    is UiState.Success -> TransactionList(state.data)
-    is UiState.Empty -> EmptyStateView("Chưa có giao dịch nào")
-    is UiState.Error -> ErrorRetryView(state.message, onRetry = { viewModel.retry() })
+when (val state = uiState.contentState) {
+    LoadState.Loading -> LoadingSkeleton()
+    is LoadState.Success -> TransactionList(state.data)
+    LoadState.Empty -> EmptyStateView("Chưa có giao dịch nào")
+    is LoadState.Error -> ErrorRetryContent(state.message, onRetry = viewModel::refresh)
 }
 ```
 
@@ -88,20 +88,31 @@ sequenceDiagram
     participant View as GroupDetailScreen / GroupSettlementContent
     participant VM as GroupDetailViewModel
     participant Algo as DebtSimplifier
+    participant GRepo as RealGroupRepository
+    participant API as Spring Boot API
     participant PRepo as PersonalFinanceRepository
-    participant DB as Room DB (SQLite)
+    participant DB as MySQL / Room cache
 
     User->>View: Chuyển sang Tab "Quyết toán" (Settlement)
     View->>VM: loadGroupDetail(groupId)
     VM->>VM: Tính netBalance từng thành viên (Paid - Owed)
     VM->>Algo: simplifyDebts(netBalances)
-    Algo-->>VM: Danh sách DebtSettlement (X trả Y amount) tối giản
+    Algo-->>VM: Kế hoạch DebtSettlement (X trả Y amount)
     VM-->>View: Render danh sách thanh toán & Tổng net cá nhân
+
+    User->>View: Xác nhận một khoản đã trả
+    View->>VM: settleDebt(from, to, amount)
+    VM->>GRepo: POST /groups/{id}/settlements
+    GRepo->>API: Lưu settlement độc lập
+    API-->>VM: Settlement đã lưu
     
     User->>View: Nhấn nút "Đồng bộ vào ví cá nhân"
-    View->>VM: syncSettlementToWallet(personalShare, walletId)
-    VM->>PRepo: createTransaction(amount, category="Chi tiêu nhóm", walletId)
-    PRepo->>DB: INSERT Transaction & UPDATE Wallet Balance
+    View->>VM: syncTripToPersonalWallet(walletId, categoryId)
+    VM->>PRepo: POST /groups/{id}/sync-personal
+    PRepo->>API: Gửi groupId, walletId, categoryId
+    API->>DB: Tự tính phần chi phí; INSERT lần đầu hoặc UPDATE giao dịch cũ
+    API->>DB: Khóa thành viên + giao dịch; hoàn tác số cũ rồi áp dụng phần mới
+    PRepo->>DB: Cache giao dịch trả về bằng Room
     DB-->>PRepo: Success
     PRepo-->>VM: Result.Success
     VM-->>View: Hiển thị Snackbar "Đồng bộ thành công!"
@@ -113,10 +124,10 @@ sequenceDiagram
 
 | Loại dữ liệu | Nơi lưu trữ | Chính sách đọc (Read Policy) | Chính sách ghi (Write Policy) | Xử lý xung đột (Conflict Handling) |
 |--------------|-------------|------------------------------|-------------------------------|-----------------------------------|
-| **Sổ thu chi & Ví cá nhân** | Local Room DB (SQLite) | Luôn đọc trực tiếp từ Local DB (Zero latency, 100% offline) | Ghi ngay vào Local DB, cập nhật StateFlow tức thì | Không có xung đột (dữ liệu thuộc quyền sở hữu riêng của 1 thiết bị) |
-| **Mục tiêu tiết kiệm** | Local Room DB (SQLite) | Đọc từ Local DB | Ghi vào Local DB | Local là nguồn chân lý duy nhất |
-| **Dữ liệu chuyến đi / Nhóm** | Remote REST API + Bộ nhớ đệm (Cache) | Ưu tiên tải từ API; nếu mất mạng thì hiển thị bản lưu đệm gần nhất kèm thông báo Offline | Gửi lên REST API qua OkHttp; nếu timeout thì báo lỗi kèm nút Retry | Server-wins cho các giao dịch nhóm đa người dùng |
-| **Token xác thực (JWT)** | `EncryptedSharedPreferences` | Đọc qua `SessionManager` khi gắn Header Authorization | Ghi khi đăng nhập thành công | Key lưu trữ trong phần cứng an toàn qua **Android Keystore** |
+| **Dashboard, giao dịch & ví cá nhân** | Spring API + Room cache | Network-first; nếu request lỗi thì trả snapshot gần nhất của đúng `userId`. `cache_markers` phân biệt collection rỗng hợp lệ với chưa từng cache | Thao tác ghi cần mạng; response thành công được cập nhật vào Room | Server là nguồn chân lý; Room v2 có thể tái tạo vì chỉ là cache |
+| **Mục tiêu tiết kiệm** | Spring API / MySQL | Đọc qua API | Ghi qua API | Chưa hỗ trợ offline; lỗi có Retry |
+| **Dữ liệu chuyến đi / Nhóm** | Spring API / MySQL | Đọc qua API | Gửi qua Retrofit; timeout hiển thị Error + Retry | Server-wins cho dữ liệu nhóm đa người dùng |
+| **Token xác thực (JWT)** | Ciphertext trong `SharedPreferences` | `SessionManager` giải mã khi gắn Authorization header | AES/GCM trước khi ghi | Khóa AES được tạo và giữ trong **Android Keystore** |
 
 ---
 
@@ -127,8 +138,10 @@ mobile-project-3/
 ├── app/app/src/main/java/com/moneycare/app/
 │   ├── data/
 │   │   ├── api/             # RetrofitClient, ApiService, OkHttp Interceptors
+│   │   ├── local/           # Room DB, DAO, cache entities và local data source
 │   │   ├── model/           # Data Transfer Objects (DTO) & Domain Models
-│   │   └── repository/      # PersonalFinanceRepository, HybridExpenseRepository, RealGroupRepository
+│   │   └── repository/      # Auth, PersonalFinance, HybridExpense, RealGroup repositories
+│   ├── di/                  # AppContainer (manual dependency injection)
 │   ├── ui/
 │   │   ├── auth/            # Login, Register, Forgot Password screens & ViewModels
 │   │   ├── components/      # CommonHeader, ValidationMessage, GroupDialogs
@@ -149,7 +162,9 @@ mobile-project-3/
 
 | Quyết định thiết kế | Phương án thay thế đã cân nhắc | Lý do chọn lựa (Trade-off & Rationale) |
 |---------------------|-------------------------------|----------------------------------------|
-| **Thuật toán tham lam Greedy cho quyết toán nợ** | Duy trì ma trận nợ từng cặp (Direct Pairwise Debts) | Nếu dùng ma trận từng cặp, trong nhóm 5 người có thể phát sinh tới $5 \times 4 / 2 = 10$ giao dịch rắc rối. Thuật toán Greedy gom thành Net Balance và chỉ sinh tối đa $N - 1$ giao dịch chuyển tiền (tối đa 4 lượt). |
+| **Thuật toán tham lam Greedy cho kế hoạch quyết toán** | Duy trì ma trận nợ từng cặp hoặc giải bài toán tối ưu tổ hợp | Greedy gom thành Net Balance, bảo toàn tổng tiền và sinh không quá $N - 1$ giao dịch. Cách này dễ hiểu và nhanh, nhưng nhóm không tuyên bố bảo đảm số giao dịch tối thiểu toàn cục cho mọi bộ dữ liệu. Settlement đã trả được lưu riêng, không sửa lịch sử hóa đơn. |
 | **Sử dụng số nguyên `Long` (VNĐ) thay vì `Double`** | Sử dụng kiểu số thực `Double` / `Float` thông thường | Số thực nhị phân (IEEE 754) gây ra sai số làm tròn khi chia bill (e.g., $100.000 / 3 = 33333.3333...$). Chuyển sang số nguyên `Long` VNĐ và phân bổ phần dư cho người thanh toán đảm bảo tổng số tiền trước và sau quyết toán luôn khớp từng đồng. |
 | **Tạo ví nhanh "+ Ví khác..." ngay trong form giao dịch** | Bắt người dùng phải thoát form, mở màn hình Quản lý ví để tạo ví trước rồi mới quay lại | Giảm tối đa ma sát người dùng (User Friction). Người dùng có thể vừa nhập hóa đơn từ ví MoMo/ZaloPay mới vừa tạo ví tức thời mà không bị gián đoạn hay mất dữ liệu đang gõ dở trên form. |
-| **Lưu Token an toàn bằng Android Keystore** | Lưu chuỗi Token vào `SharedPreferences` thông thường | Ngăn chặn nguy cơ bị đánh cắp Session Token khi thiết bị bị root hoặc trích xuất bản sao lưu APK qua ADB. |
+| **Lưu Token bằng AES/GCM + Android Keystore** | Lưu JWT plaintext trong `SharedPreferences` | File preferences chỉ chứa ciphertext và IV; khóa AES không được ghi vào repository hoặc file preferences. Đây không phải API `EncryptedSharedPreferences`, mà là mã hóa trực tiếp trong `SessionManager`. |
+| **Room theo chiến lược network-first cache** | Local-first với outbox đồng bộ hai chiều | Đủ để xem dashboard, giao dịch và ví khi mất mạng mà không phải giải quyết ID tạm/xung đột ghi. Đổi lại, tạo/sửa/xóa vẫn cần mạng và server là nguồn chân lý. |
+| **Manual dependency injection (`AppContainer`)** | Hilt/Dagger hoặc khởi tạo repository trong từng ViewModel | Giữ dependency graph nhỏ, dễ mock trong unit test và dễ giải thích khi bảo vệ; không để Composable gọi API/database trực tiếp. |

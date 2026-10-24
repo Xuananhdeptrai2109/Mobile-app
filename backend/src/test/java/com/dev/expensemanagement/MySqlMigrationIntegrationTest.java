@@ -64,17 +64,31 @@ class MySqlMigrationIntegrationTest {
                         + "WHERE table_schema = DATABASE() AND table_name = 'notifications'",
                 Integer.class
         );
+        Integer settlementTableCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'group_settlements'",
+                Integer.class
+        );
+        Integer sourceGroupColumnCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = DATABASE() "
+                        + "AND table_name = 'personal_transactions' "
+                        + "AND column_name = 'source_group_id'",
+                Integer.class
+        );
         Integer defaultWalletCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM personal_wallets WHERE is_default = TRUE",
                 Integer.class
         );
 
-        assertEquals(6, migrationCount);
+        assertEquals(9, migrationCount);
         assertEquals(1, taskTableCount);
         assertEquals(1, personalTransactionTableCount);
         assertEquals(1, monthlyBudgetTableCount);
         assertEquals(1, savingsGoalTableCount);
         assertEquals(1, notificationTableCount);
+        assertEquals(1, settlementTableCount);
+        assertEquals(1, sourceGroupColumnCount);
         assertEquals(0, defaultWalletCount);
     }
 }

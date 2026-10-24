@@ -25,14 +25,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.moneycare.app.data.model.ExpenseGroup
-import com.moneycare.app.data.model.GroupMember
 import com.moneycare.app.ui.components.MemberPickerBottomSheet
+import com.moneycare.app.ui.components.ErrorRetryContent
 import com.moneycare.app.ui.theme.ScreenBackground
 import com.moneycare.app.viewmodel.GroupDetailTab
 import com.moneycare.app.viewmodel.GroupDetailUiState
@@ -77,12 +78,14 @@ fun GroupDetailScreen(
     }
 
     val memberSheetState = rememberModalBottomSheetState()
-    var showMemberPicker by remember { mutableStateOf(false) }
-    var showEditGroup by remember { mutableStateOf(false) }
-    var showBudget by remember { mutableStateOf(false) }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
-    var memberToEdit by remember { mutableStateOf<GroupMember?>(null) }
-    var memberToRemove by remember { mutableStateOf<GroupMember?>(null) }
+    var showMemberPicker by rememberSaveable { mutableStateOf(false) }
+    var showEditGroup by rememberSaveable { mutableStateOf(false) }
+    var showBudget by rememberSaveable { mutableStateOf(false) }
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+    var memberToEditId by rememberSaveable { mutableStateOf<String?>(null) }
+    var memberToRemoveId by rememberSaveable { mutableStateOf<String?>(null) }
+    val memberToEdit = group?.members?.firstOrNull { it.id == memberToEditId }
+    val memberToRemove = group?.members?.firstOrNull { it.id == memberToRemoveId }
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -114,9 +117,10 @@ fun GroupDetailScreen(
                     }
                 }
                 uiState.errorMessage != null && group == null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(text = uiState.errorMessage ?: "Đã có lỗi xảy ra")
-                    }
+                    ErrorRetryContent(
+                        message = uiState.errorMessage ?: "Đã có lỗi xảy ra",
+                        onRetry = { viewModel.loadGroup(groupId) }
+                    )
                 }
                 group != null -> {
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -158,14 +162,20 @@ fun GroupDetailScreen(
                                 )
                                 GroupDetailTab.SETTLEMENT -> GroupSettlementContent(
                                     group = group,
-                                    onSettleDebt = { fromId, toId ->
-                                        viewModel.settleDebtBetweenMembers(fromId, toId)
+                                    onSettleDebt = { fromId, toId, amount ->
+                                        viewModel.settleDebtBetweenMembers(fromId, toId, amount) {
+                                            viewModel.showMessage("Đã ghi nhận khoản thanh toán thành công")
+                                        }
                                     },
-                                    onSyncToWallet = { walletId, categoryId, amount ->
-                                        viewModel.syncTripToPersonalWallet(walletId, categoryId, amount) {
+                                    onSyncToWallet = { walletId, categoryId ->
+                                        viewModel.syncTripToPersonalWallet(walletId, categoryId) {
                                             viewModel.showMessage("Đã đồng bộ chi phí vào ví cá nhân thành công!")
                                         }
-                                    }
+                                    },
+                                    wallets = uiState.settlementWallets,
+                                    categories = uiState.settlementCategories,
+                                    isLoadingSyncOptions = uiState.isLoadingSettlementOptions,
+                                    onLoadSyncOptions = { viewModel.loadSettlementOptions(forceRefresh = true) }
                                 )
                                 GroupDetailTab.TASKS -> GroupTaskContent(
                                     group = group,
@@ -177,8 +187,8 @@ fun GroupDetailScreen(
                                     group = group,
                                     currentUserIsAdmin = currentUserIsOwner,
                                     onViewMemberDetail = { member -> onNavigateToMemberDetail(member.id) },
-                                    onEditMember = { memberToEdit = it },
-                                    onRemoveMember = { memberToRemove = it },
+                                    onEditMember = { memberToEditId = it.id },
+                                    onRemoveMember = { memberToRemoveId = it.id },
                                     onInviteMember = { showMemberPicker = true }
                                 )
                                 GroupDetailTab.ACTIVITY -> GroupActivityContent(uiState.activities)
@@ -240,9 +250,9 @@ fun GroupDetailScreen(
         EditMemberDialog(
             initialName = member.name,
             isSaving = uiState.isSaving,
-            onDismiss = { memberToEdit = null },
+            onDismiss = { memberToEditId = null },
             onConfirm = { name ->
-                viewModel.updateMember(member.id, name) { memberToEdit = null }
+                viewModel.updateMember(member.id, name) { memberToEditId = null }
             }
         )
     }
@@ -254,8 +264,8 @@ fun GroupDetailScreen(
             confirmLabel = "Xóa thành viên",
             destructive = true,
             isSaving = uiState.isSaving,
-            onDismiss = { memberToRemove = null },
-            onConfirm = { viewModel.removeMember(member.id) { memberToRemove = null } }
+            onDismiss = { memberToRemoveId = null },
+            onConfirm = { viewModel.removeMember(member.id) { memberToRemoveId = null } }
         )
     }
 }

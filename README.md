@@ -16,7 +16,7 @@
 | 2 | Nguyễn Văn Hiếu | B23DCCE032 | E23HTTT03 | hieusieucappro2k5 | Mobile Dev / Database |
 | 3 | Nguyễn Minh Hùng | B23DCCE041 | E23HTTT03 | Saahn-Uzaal | Mobile / SEC - Test |
 
-**Topic:** Offline-first personal expense tracker & Group bill splitter
+**Topic:** Personal expense tracker with offline cached reads & Group bill splitter
 
 ---
 
@@ -28,8 +28,8 @@
 - **What makes it non-trivial (Key Challenges):**
   1. *Debt Simplification Algorithm:* Minimizing the number of transactions required to settle group debts (e.g., A owes B $10, B owes C $10 $\rightarrow$ A owes C $10).
   2. *Data Structures & Split Logic:* Handling multi-member bill splits (equal/custom) clearly without relying on banking APIs.
-  3. *Offline-First & Sync:* Keeping personal finances 100% functional offline (SQLite/Room), while flexibly syncing group settlement data into the personal wallet.
-- **Out of scope:** Linking real bank accounts, in-app direct bank transfers, OCR receipt scanning.
+  3. *Offline Cache & Sync:* Keeping the latest dashboard, transaction history and wallets readable through a per-user Room cache, while the server remains authoritative for writes and group-to-wallet sync.
+- **Out of scope:** Linking real bank accounts and in-app direct bank transfers. Receipt/audio extraction is an experimental optional extension that requires backend `GEMINI_API_KEY` configuration; it is not part of the offline core flow.
 
 Full proposal: [`docs/proposal.md`](docs/proposal.md)
 
@@ -60,7 +60,7 @@ Full proposal: [`docs/proposal.md`](docs/proposal.md)
 |--------------------------|--------------|--------------|
 | [x] Manual Wallet & Category management | [ ] Multi-currency for trips | ❌ Linking real bank accounts |
 | [x] Tùy chọn "Ví khác..." tạo ví động trong form | [ ] Export reports to PDF/Excel | ❌ In-app bank transfers |
-| [x] Quản lý ví với bảng màu Pastel trang nhã | [x] Notifications for new bills/updates | ❌ OCR Receipt Scanning |
+| [x] Quản lý ví với bảng màu Pastel trang nhã | [x] Notifications for new bills/updates | ❌ OCR as a required core feature |
 | [x] Daily Income / Expense logging | [x] Xuất báo cáo nhóm ra CSV | |
 | [x] Saving goals with progress tracking | | |
 | [x] Create Trip/Group & Add members | | |
@@ -72,7 +72,7 @@ Full proposal: [`docs/proposal.md`](docs/proposal.md)
 - **Flow 1 (Personal Finance):** Home $\rightarrow$ Add Transaction $\rightarrow$ Chọn loại Thu nhập / Chi tiêu $\rightarrow$ Chọn ví có sẵn hoặc tạo "Ví khác..." $\rightarrow$ Lưu $\rightarrow$ Cập nhật tức thì Số dư hiện tại & Tiến độ mục tiêu tiết kiệm.
 - **Flow 2 (Group Trip, Bill Splitting & Settlement):** Group Home $\rightarrow$ Tạo chuyến đi (e.g., "Đà Lạt Trip") $\rightarrow$ Thêm thành viên $\rightarrow$ Thêm Bill (chọn người trả & người hưởng thụ, chia đều / custom) $\rightarrow$ Tab **Quyết toán** (Xem thuật toán rút gọn nợ Greedy) $\rightarrow$ Xác nhận thanh toán $\rightarrow$ Bấm **"Đồng bộ vào ví cá nhân"** để lưu số tiền thực chi vào ví.
 
-- [x] **Offline:** Personal expense records, wallets, saving goals, and local trip drafts are available without network.
+- [x] **Offline cached reads:** Dashboard, personal transaction history and wallets fall back to the latest complete per-user Room snapshot, including a valid empty collection. Creating or editing data still requires network.
 - [x] **UI states:** Loading / Success / Empty / Error with retry on every data screen.
 
 ---
@@ -93,7 +93,7 @@ graph TD
 | Framework | **Kotlin + Jetpack Compose** | Modern declarative UI, officially recommended for Android development. |
 | State management | **ViewModel + StateFlow** | Reactive, lifecycle-aware state handling with unidirectional data flow. |
 | HTTP client | **Retrofit 2 + OkHttp 3** | Industry standard, robust interceptors for JWT auth and logging. |
-| Local storage | **Room (SQLite) + Android Keystore** | Robust offline-first persistence with hardware-backed encryption for secrets. |
+| Local storage | **Room network cache + Android Keystore** | Cached personal data remains readable offline; the JWT is encrypted with a Keystore-held AES key. |
 
 Details: [`docs/architecture.md`](docs/architecture.md) · UI/UX: [`docs/ui-design.md`](docs/ui-design.md)
 
@@ -134,8 +134,11 @@ cp .env.example .env    # Configure BASE_URL
 
 ## 6. Test Evidence
 
-*(Results for: airplane mode, slow/failed requests, empty data, rotation, different screen sizes.
-Full results: [`docs/testing-guide.md`](docs/testing-guide.md).)*
+- Android JVM tests: **15 passed, 0 failed, 0 skipped** across 6 suites; debug lint completed with **0 errors and 50 warnings** (`cd app && .\gradlew.bat :app:testDebugUnitTest :app:lintDebug --no-daemon`).
+- Backend tests: **52 passed, 0 failed, 1 skipped** across 16 suites, 53 tests discovered (`cd backend && .\gradlew.bat test --no-daemon`). The skipped MySQL migration test still requires Docker/Testcontainers.
+- Manual airplane-mode, timeout, rotation and screen-size scenarios are still pending and are explicitly marked as such; they must not be claimed as passed before device/emulator evidence exists.
+
+Full commands and evidence: [`docs/testing-guide.md`](docs/testing-guide.md).
 
 ---
 
@@ -168,13 +171,13 @@ Full results: [`docs/testing-guide.md`](docs/testing-guide.md).)*
 
 ### 8.2 Decisions we made ourselves
 
-- **Room Database as Single Source of Truth for Personal Finance:** We decided that personal records (wallets, daily expenses, savings) must be fully functional offline without network reliance, syncing up to the server only when online.
+- **Room as a network cache:** Dashboard, transaction history and wallets use a per-user Room cache. The Spring backend remains the source of truth; writes require network, which avoids unresolved two-way sync conflicts.
 - **Android Keystore for JWT Security:** Rather than storing tokens in plain SharedPreferences, we integrated hardware-backed Android Keystore encryption to protect session tokens against reverse engineering.
 - **Greedy Graph Debt Simplification:** Chose a greedy transaction-minimizing algorithm to settle group debts instead of keeping a complete matrix of debts, making settlements clean and easy for users.
 
 ### 8.3 Where AI was wrong — and how we found out
 
-- **AI hallucinated plaintext SharedPreferences for auth tokens:** AI suggested saving the JWT bearer token directly in standard `SharedPreferences`. In security review, we detected this flaw and implemented Android Keystore with `EncryptedSharedPreferences`.
+- **AI suggested plaintext SharedPreferences for auth tokens:** We rejected that approach. `SessionManager` encrypts the JWT with AES/GCM using a key held by Android Keystore, then stores only ciphertext and its IV in regular `SharedPreferences`.
 - **AI assumed synchronous REST calls for group bill settlement:** AI suggested blocking UI calls for splitting group expenses. We discovered UI stutter during poor network conditions and refactored to Kotlin Coroutines with asynchronous `StateFlow` and optimistic local updates.
 
 ### 8.4 Full log

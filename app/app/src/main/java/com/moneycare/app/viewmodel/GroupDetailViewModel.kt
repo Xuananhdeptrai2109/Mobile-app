@@ -2,6 +2,7 @@ package com.moneycare.app.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.ExpenseGroup
 import com.moneycare.app.data.model.ExpenseSplit
 import com.moneycare.app.data.model.ExpenseSplitMethod
@@ -10,7 +11,10 @@ import com.moneycare.app.data.model.GroupMember
 import com.moneycare.app.data.model.GroupTask
 import com.moneycare.app.data.model.MemberStats
 import com.moneycare.app.data.model.group.GroupActivityResponse
+import com.moneycare.app.data.model.personal.PersonalCategoryResponse
+import com.moneycare.app.data.model.personal.WalletResponse
 import com.moneycare.app.data.repository.RealGroupRepository
+import com.moneycare.app.data.repository.PersonalFinanceRepository
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,19 +53,42 @@ data class GroupDetailUiState(
     val selectedTask: GroupTask? = null,
     val memberStats: MemberStats? = null,
     val memberExpenses: List<GroupExpense> = emptyList(),
-    val activities: List<GroupActivityResponse> = emptyList()
+    val activities: List<GroupActivityResponse> = emptyList(),
+    val settlementWallets: List<WalletResponse> = emptyList(),
+    val settlementCategories: List<PersonalCategoryResponse> = emptyList(),
+    val isLoadingSettlementOptions: Boolean = false,
+    val settlementOptionsLoaded: Boolean = false
 )
 
 class GroupDetailViewModel(
-    private val repository: RealGroupRepository = RealGroupRepository()
+    private val repository: RealGroupRepository = MoneyCareApp.instance.container.groupRepository,
+    private val personalRepository: PersonalFinanceRepository = MoneyCareApp.instance.container.personalFinanceRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GroupDetailUiState())
     val uiState: StateFlow<GroupDetailUiState> = _uiState.asStateFlow()
 
+    fun ensureGroupLoaded(groupId: String) {
+        val state = _uiState.value
+        if (state.group?.id == groupId || state.isLoading) return
+        loadGroup(groupId)
+    }
+
     fun loadGroup(groupId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { state ->
+                val isDifferentGroup = state.group?.id != groupId
+                state.copy(
+                    group = if (isDifferentGroup) null else state.group,
+                    selectedExpense = if (isDifferentGroup) null else state.selectedExpense,
+                    selectedMember = if (isDifferentGroup) null else state.selectedMember,
+                    selectedTask = if (isDifferentGroup) null else state.selectedTask,
+                    memberStats = if (isDifferentGroup) null else state.memberStats,
+                    memberExpenses = if (isDifferentGroup) emptyList() else state.memberExpenses,
+                    isLoading = true,
+                    errorMessage = null
+                )
+            }
             runCatching {
                 val group = repository.getGroup(groupId)
                 group to runCatching { repository.getGroupActivities(groupId) }.getOrDefault(emptyList())
@@ -83,6 +110,35 @@ class GroupDetailViewModel(
 
     fun selectExpenseFilter(filter: ExpenseFilter) {
         _uiState.update { it.copy(selectedExpenseFilter = filter) }
+    }
+
+    fun loadSettlementOptions(forceRefresh: Boolean = false) {
+        val state = _uiState.value
+        if (state.isLoadingSettlementOptions || (state.settlementOptionsLoaded && !forceRefresh)) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingSettlementOptions = true, errorMessage = null) }
+            runCatching {
+                val wallets = personalRepository.getWallets()
+                val categories = personalRepository.getCategories(com.moneycare.app.data.model.TransactionType.EXPENSE)
+                wallets to categories
+            }.onSuccess { (wallets, categories) ->
+                _uiState.update {
+                    it.copy(
+                        settlementWallets = wallets,
+                        settlementCategories = categories,
+                        isLoadingSettlementOptions = false,
+                        settlementOptionsLoaded = true
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isLoadingSettlementOptions = false,
+                        errorMessage = error.toUserMessage("Không thể tải ví và danh mục")
+                    )
+                }
+            }
+        }
     }
 
     fun clearError() {
@@ -155,13 +211,30 @@ class GroupDetailViewModel(
     }
 
     fun loadExpenseDetail(expenseId: String) {
-        val expense = _uiState.value.group?.expenses?.find { it.id == expenseId }
-        _uiState.update { it.copy(selectedExpense = expense) }
+        val group = _uiState.value.group ?: return
+        val expense = group.expenses.find { it.id == expenseId }
+        _uiState.update {
+            it.copy(
+                selectedExpense = expense,
+                errorMessage = if (expense == null) "Không tìm thấy khoản chi này" else null
+            )
+        }
     }
 
     fun loadMemberDetail(memberId: String) {
         val group = _uiState.value.group ?: return
         val member = group.members.find { it.id == memberId }
+        if (member == null) {
+            _uiState.update {
+                it.copy(
+                    selectedMember = null,
+                    memberStats = null,
+                    memberExpenses = emptyList(),
+                    errorMessage = "Không tìm thấy thành viên này"
+                )
+            }
+            return
+        }
         val expenses = group.expenses.filter { expense ->
             expense.paidBy.id == memberId || expense.splitMembers.any { it.member.id == memberId }
         }
@@ -601,25 +674,17 @@ class GroupDetailViewModel(
     fun syncTripToPersonalWallet(
         walletId: Long,
         categoryId: Long,
-        amount: Long,
         onSuccess: () -> Unit
     ) {
         val group = _uiState.value.group ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
             runCatching {
-                val personalRepo = com.moneycare.app.data.repository.PersonalFinanceRepository()
-                val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())
-                personalRepo.createTransaction(
-                    com.moneycare.app.data.model.personal.PersonalTransactionRequest(
-                        title = "Chi tiêu chuyến đi: ${group.name}",
-                        amount = amount,
-                        type = com.moneycare.app.data.model.TransactionType.EXPENSE,
-                        categoryId = categoryId,
-                        walletId = walletId,
-                        note = "Tự động đồng bộ chi phí từ nhóm ${group.name}",
-                        transactionTime = timestamp
-                    )
+                personalRepository.syncGroupToWallet(
+                    groupId = group.id.toLongOrNull()
+                        ?: throw IllegalArgumentException("Mã nhóm không hợp lệ"),
+                    walletId = walletId,
+                    categoryId = categoryId
                 )
             }.onSuccess {
                 _uiState.update { it.copy(isSaving = false) }
@@ -635,30 +700,24 @@ class GroupDetailViewModel(
         }
     }
 
-    fun settleDebtBetweenMembers(fromMemberId: String, toMemberId: String, onSuccess: () -> Unit = {}) {
+    fun settleDebtBetweenMembers(
+        fromMemberId: String,
+        toMemberId: String,
+        amount: Long,
+        onSuccess: () -> Unit = {}
+    ) {
         val group = _uiState.value.group ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
-            runCatching {
-                val updatedExpenses = group.expenses.map { expense ->
-                    if (expense.paidBy.id == toMemberId) {
-                        val newSplits = expense.splitMembers.map { split ->
-                            if (split.member.id == fromMemberId && !split.isPaid) {
-                                if (split.id.isNotBlank()) {
-                                    runCatching { repository.toggleSplitPayment(group.id, expense.id, split.id) }
-                                }
-                                split.copy(isPaid = true)
-                            } else split
-                        }
-                        expense.copy(
-                            splitMembers = newSplits,
-                            isSettled = newSplits.isNotEmpty() && newSplits.all { it.isPaid }
-                        )
-                    } else expense
+            runCatching { repository.settleDebt(group.id, fromMemberId, toMemberId, amount) }
+            .onSuccess { settlement ->
+                _uiState.update {
+                    it.copy(
+                        group = group.copy(settlements = group.settlements + settlement),
+                        isSaving = false
+                    )
                 }
-                group.copy(expenses = updatedExpenses)
-            }.onSuccess { updatedGroup ->
-                _uiState.update { it.copy(group = updatedGroup, isSaving = false) }
+                refreshActivities(group.id)
                 onSuccess()
             }.onFailure { error ->
                 _uiState.update {

@@ -2,8 +2,10 @@ package com.moneycare.app.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.group.GroupReportResponse
 import com.moneycare.app.data.repository.RealGroupRepository
+import com.moneycare.app.ui.state.LoadState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -14,10 +16,18 @@ data class GroupReportUiState(
     val isLoading: Boolean = false,
     val isExporting: Boolean = false,
     val errorMessage: String? = null
-)
+) {
+    val contentState: LoadState<GroupReportResponse>
+        get() = when {
+            isLoading && report == null -> LoadState.Loading
+            errorMessage != null && report == null -> LoadState.Error(errorMessage)
+            report == null -> LoadState.Empty
+            else -> LoadState.Success(report)
+        }
+}
 
 class GroupReportViewModel(
-    private val repository: RealGroupRepository = RealGroupRepository()
+    private val repository: RealGroupRepository = MoneyCareApp.instance.container.groupRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(GroupReportUiState())
     val uiState = _uiState.asStateFlow()

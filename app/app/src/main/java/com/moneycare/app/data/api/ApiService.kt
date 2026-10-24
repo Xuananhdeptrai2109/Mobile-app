@@ -75,6 +75,12 @@ interface ApiService {
         @Body request: PersonalTransactionRequest
     ): PersonalTransactionResponse
 
+    @POST("groups/{groupId}/sync-personal")
+    suspend fun syncGroupExpenseToPersonal(
+        @Path("groupId") groupId: Long,
+        @Body request: SyncGroupExpenseRequest
+    ): PersonalTransactionResponse
+
     @GET("transactions/{transactionId}")
     suspend fun getPersonalTransaction(
         @Path("transactionId") transactionId: Long
@@ -207,6 +213,17 @@ interface ApiService {
         @Path("expenseId") expenseId: Long,
         @Path("splitId") splitId: Long
     ): GroupExpenseSplitResponse
+
+    @GET("groups/{groupId}/settlements")
+    suspend fun getGroupSettlements(
+        @Path("groupId") groupId: Long
+    ): List<GroupSettlementResponse>
+
+    @POST("groups/{groupId}/settlements")
+    suspend fun createGroupSettlement(
+        @Path("groupId") groupId: Long,
+        @Body request: CreateGroupSettlementRequest
+    ): GroupSettlementResponse
 
     // Group Task endpoints
     @POST("groups/{groupId}/tasks")

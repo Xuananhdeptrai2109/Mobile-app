@@ -2,8 +2,11 @@ package com.moneycare.app.ui.personal
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.model.personal.NotificationResponse
 import com.moneycare.app.data.repository.PersonalFinanceRepository
+import com.moneycare.app.ui.state.LoadState
+import com.moneycare.app.ui.state.resolveLoadState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,10 +18,13 @@ data class NotificationUiState(
     val unreadCount: Long = 0,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
-)
+) {
+    val contentState: LoadState<List<NotificationResponse>>
+        get() = resolveLoadState(isLoading, notifications, errorMessage)
+}
 
 class NotificationViewModel(
-    private val repository: PersonalFinanceRepository = PersonalFinanceRepository()
+    private val repository: PersonalFinanceRepository = MoneyCareApp.instance.container.personalFinanceRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(NotificationUiState())
     val uiState: StateFlow<NotificationUiState> = _uiState.asStateFlow()

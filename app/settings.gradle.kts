@@ -24,4 +24,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "MoneyCare"
 include(":app")
-include(":myapplication")

@@ -45,7 +45,7 @@ flowchart TD
 
 | ID | Screen | Purpose | Main components | Data source |
 |:--:|--------|---------|-----------------|-------------|
-| `SCR-01` | **Home (Personal)** | Dashboard for individual finance. | Balance card, Income/Expense summary, Saving goal progress, Recent transactions. | Local DB (SQLite/Room) |
+| `SCR-01` | **Home (Personal)** | Dashboard for individual finance. | Balance card, Income/Expense summary, Saving goal progress, Recent transactions. | Spring API + per-user Room read cache |
 | `SCR-02` | **Home (Group)** | List of active shared groups and tasks. | Group cards (members, budget), Task list summary. | API / Local Cache |
 | `SCR-03` | **Group Overview / Detail** | Main hub for a specific group. | Tab bar (Overview, Expenses, Tasks, Members, Settlement), Budget progress bar, Quick stats. | API / Local Cache |
 | `SCR-04` | **Add Expense** | Form to log a shared bill. | Amount input, Category picker, Payer selection, Split distribution (equal/custom). | User Input -> API |
@@ -54,7 +54,7 @@ flowchart TD
 | `SCR-07` | **Wallet Management** | Quản lý danh mục ví thanh toán cá nhân. | Danh sách thẻ ví với bảng 10 màu Pastel ngẫu nhiên, tổng số dư các ví, nút tạo ví mới. | Local DB / Repository |
 | `SCR-08` | **Transaction Form** | Form nhập thu nhập / chi tiêu cá nhân nhanh. | Trường nhập tiền, chọn danh mục, bộ chọn ví linh hoạt (kèm lựa chọn "+ Ví khác..." tạo ví tức thì). | Local DB / User Input |
 | `SCR-09` | **Debt Settlement (Quyết toán)** | Tab quyết toán rút gọn nợ trong nhóm. | Thẻ thống kê (Đã chi, Phải chịu, Net Balance), danh sách chuyển tiền tối giản (Greedy matching), nút "Đồng bộ vào ví cá nhân". | `DebtSimplifier` / Group ViewModel |
-| `SCR-10` | **Savings Goals** | Quản lý và theo dõi các mục tiêu tiết kiệm. | Danh sách mục tiêu, thanh tiến độ % hoàn thành, số tiền còn thiếu, nút nạp tiền vào quỹ. | Local DB (SQLite/Room) |
+| `SCR-10` | **Savings Goals** | Quản lý và theo dõi các mục tiêu tiết kiệm. | Danh sách mục tiêu, thanh tiến độ % hoàn thành, số tiền còn thiếu, nút nạp tiền vào quỹ. | Spring API (online-only) |
 | `SCR-11` | **Auth (Login / Register)** | Xác thực và phân quyền tài khoản người dùng. | Form đăng nhập/đăng ký với kiểm tra tính hợp lệ dữ liệu trực quan (validation states). | Remote REST API / Keystore |
 
 ---
@@ -111,11 +111,18 @@ Bằng chứng triển khai thực tế trên thiết bị di động (10 màn h
 
 ## 6. UI States
 
-For the **Group Expenses List** screen:
-
 | Screen | Loading | Success | Empty | Error (with retry) |
 |--------|---------|---------|-------|--------------------|
 | Group Expenses | Skeleton list items pulsing gently. | Shows list of transactions categorized by date. | Illustration of empty wallet + "No expenses yet. Tap + to add." | "Unable to sync group data." + Retry button. |
+| Personal Transactions | Centered progress indicator. | Filterable, paged transaction list. | Receipt icon + “Chưa có giao dịch trong tháng này”. | Full error message + “Thử lại”; cached Room data is rendered as Success when available. |
+| Wallets | Centered progress indicator. | Wallet cards and management actions. | “Chưa có ví” with the add action still available. | Full error message + “Thử lại”; cached wallets are used when available. |
+| Savings Goals | Centered progress indicator. | Goal cards and contribution actions. | Goal illustration and create prompt. | Full error message + “Thử lại”. |
+| Statistics | Centered progress indicator. | Metrics, budget, category and daily sections. | Empty messages inside charts/sections. | Full error message + “Thử lại”. |
+| Group Detail | Centered progress indicator before the group loads. | Tabs for overview, expenses, settlement, tasks, members and activity. | Context-specific messages inside each tab. | Full error message + “Thử lại” before data exists; Snackbar for later action failures. |
+
+| Group child routes | Loading shell with title and back navigation while the parent group is restored. | Expense/member detail or the requested form. | A missing referenced item is not treated as a create form. | Full error message + Retry reloads the `groupId` carried by the route. |
+
+Form fields that users may spend time entering use `rememberSaveable` (including custom savers for split members and group members). Child group routes include `groupId`, so rotation or Activity recreation can restore the correct source data instead of rendering a blank screen. Runtime-only UI objects such as snackbar hosts remain ordinary `remember` state.
 
 ---
 

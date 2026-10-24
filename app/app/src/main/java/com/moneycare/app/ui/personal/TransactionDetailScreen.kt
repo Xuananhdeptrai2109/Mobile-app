@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.moneycare.app.data.model.TransactionType
 import com.moneycare.app.ui.components.GroupDetailTopBar
+import com.moneycare.app.ui.components.ErrorRetryContent
+import com.moneycare.app.ui.state.LoadState
 import com.moneycare.app.ui.theme.ExpenseRed
 import com.moneycare.app.ui.theme.IncomeGreen
 import java.text.NumberFormat
@@ -52,11 +55,11 @@ fun TransactionDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(transactionId) { viewModel.loadTransaction(transactionId.toLongOrNull() ?: return@LaunchedEffect) }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.selectedTransaction != null) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -83,13 +86,26 @@ fun TransactionDetailScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = { GroupDetailTopBar(title = "Chi tiết giao dịch", onBackClick = onBackClick) }
     ) { padding ->
-        val transaction = state.selectedTransaction?.takeIf { it.id == transactionId }
-        if (state.isLoading || transaction == null) {
-            androidx.compose.foundation.layout.Box(
+        when (val content = state.detailState) {
+            LoadState.Loading -> androidx.compose.foundation.layout.Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
-        } else {
+
+            is LoadState.Error -> ErrorRetryContent(
+                message = content.message,
+                onRetry = { transactionId.toLongOrNull()?.let(viewModel::loadTransaction) },
+                modifier = Modifier.padding(padding)
+            )
+
+            LoadState.Empty -> ErrorRetryContent(
+                message = "Không tìm thấy giao dịch",
+                onRetry = { transactionId.toLongOrNull()?.let(viewModel::loadTransaction) },
+                modifier = Modifier.padding(padding)
+            )
+
+            is LoadState.Success -> {
+            val transaction = content.data
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -146,6 +162,7 @@ fun TransactionDetailScreen(
                         Text("Chỉnh sửa", modifier = Modifier.padding(start = 6.dp))
                     }
                 }
+            }
             }
         }
     }

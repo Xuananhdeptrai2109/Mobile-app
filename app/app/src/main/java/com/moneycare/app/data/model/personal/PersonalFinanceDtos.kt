@@ -54,9 +54,15 @@ data class PersonalTransactionResponse(
     val walletName: String,
     val note: String?,
     val receiptImageUrl: String?,
+    val sourceGroupId: Long? = null,
     val transactionTime: String,
     val createdAt: String,
     val updatedAt: String
+)
+
+data class SyncGroupExpenseRequest(
+    val walletId: Long,
+    val categoryId: Long
 )
 
 data class PersonalTransactionRequest(

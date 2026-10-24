@@ -39,6 +39,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -69,16 +71,20 @@ fun TransactionFormScreen(
     val snackbar = remember { SnackbarHostState() }
     val editingId = transactionId?.toLongOrNull()
 
-    var title by remember(transactionId) { mutableStateOf("") }
-    var amount by remember(transactionId) { mutableLongStateOf(0L) }
-    var type by remember(transactionId) { mutableStateOf(TransactionType.EXPENSE) }
-    var categoryId by remember(transactionId) { mutableStateOf<Long?>(null) }
-    var walletId by remember(transactionId) { mutableStateOf<Long?>(null) }
-    var note by remember(transactionId) { mutableStateOf("") }
-    var transactionTime by remember(transactionId) { mutableStateOf(Calendar.getInstance()) }
-    var initialized by remember(transactionId) { mutableStateOf(false) }
-    var showCreateWalletDialog by remember { mutableStateOf(false) }
-    var newWalletName by remember { mutableStateOf("") }
+    var title by rememberSaveable(transactionId) { mutableStateOf("") }
+    var amount by rememberSaveable(transactionId) { mutableLongStateOf(0L) }
+    var type by rememberSaveable(transactionId, stateSaver = TransactionTypeSaver) {
+        mutableStateOf(TransactionType.EXPENSE)
+    }
+    var categoryId by rememberSaveable(transactionId) { mutableStateOf<Long?>(null) }
+    var walletId by rememberSaveable(transactionId) { mutableStateOf<Long?>(null) }
+    var note by rememberSaveable(transactionId) { mutableStateOf("") }
+    var transactionTime by rememberSaveable(transactionId, stateSaver = CalendarSaver) {
+        mutableStateOf(Calendar.getInstance())
+    }
+    var initialized by rememberSaveable(transactionId) { mutableStateOf(false) }
+    var showCreateWalletDialog by rememberSaveable { mutableStateOf(false) }
+    var newWalletName by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(transactionId) {
         viewModel.clearSelectedTransaction()
@@ -441,3 +447,13 @@ private fun String.toCalendar(): Calendar {
     }
     return calendar
 }
+
+private val TransactionTypeSaver = Saver<TransactionType, String>(
+    save = { it.name },
+    restore = TransactionType::valueOf
+)
+
+private val CalendarSaver = Saver<Calendar, Long>(
+    save = { it.timeInMillis },
+    restore = { value -> Calendar.getInstance().apply { timeInMillis = value } }
+)

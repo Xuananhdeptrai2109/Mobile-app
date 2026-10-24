@@ -1,6 +1,7 @@
 package com.dev.expensemanagement.service;
 
 import com.dev.expensemanagement.dto.request.PersonalTransactionRequest;
+import com.dev.expensemanagement.dto.request.SyncGroupExpenseRequest;
 import com.dev.expensemanagement.dto.response.PagedResponse;
 import com.dev.expensemanagement.dto.response.PersonalDashboardResponse;
 import com.dev.expensemanagement.dto.response.PersonalTransactionResponse;
@@ -9,10 +10,13 @@ import com.dev.expensemanagement.entity.PersonalTransaction;
 import com.dev.expensemanagement.entity.PersonalTransactionType;
 import com.dev.expensemanagement.entity.PersonalWallet;
 import com.dev.expensemanagement.entity.User;
+import com.dev.expensemanagement.entity.GroupMember;
 import com.dev.expensemanagement.repository.PersonalCategoryRepository;
 import com.dev.expensemanagement.repository.PersonalTransactionRepository;
 import com.dev.expensemanagement.repository.PersonalWalletRepository;
 import com.dev.expensemanagement.repository.UserRepository;
+import com.dev.expensemanagement.repository.GroupExpenseSplitRepository;
+import com.dev.expensemanagement.security.GroupAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -37,6 +41,8 @@ public class PersonalTransactionService {
     private final PersonalWalletRepository walletRepository;
     private final PersonalCategoryRepository categoryRepository;
     private final UserRepository userRepository;
+    private final GroupExpenseSplitRepository groupExpenseSplitRepository;
+    private final GroupAuthorizationService groupAuthorizationService;
 
     @Transactional
     public PersonalTransactionResponse createTransaction(
@@ -61,6 +67,79 @@ public class PersonalTransactionService {
 
         adjustBalance(wallet, request.getType(), request.getAmount(), 1);
         walletRepository.save(wallet);
+        return toResponse(transactionRepository.save(transaction));
+    }
+
+    /**
+     * Creates or refreshes the single personal expense associated with a group.
+     * The amount is derived from server-side split shares. Re-syncing reverses
+     * the previous wallet effect before applying the latest amount.
+     */
+    @Transactional
+    public PersonalTransactionResponse syncGroupExpense(
+            Long userId,
+            Long groupId,
+            SyncGroupExpenseRequest request
+    ) {
+        // The membership row exists before the first sync and serializes repeated
+        // taps even if concurrent requests choose different personal wallets.
+        GroupMember currentMember = groupAuthorizationService.requireMemberForUpdate(groupId, userId);
+        PersonalTransaction existing = transactionRepository
+                .findByUserIdAndSourceGroupIdForUpdate(userId, groupId)
+                .orElse(null);
+
+        BigDecimal amount = groupExpenseSplitRepository.findByExpense_Group_Id(groupId).stream()
+                .filter(split -> split.getMember().getId().equals(currentMember.getId()))
+                .map(split -> split.getSplitAmount())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Bạn chưa có phần chi phí nào trong nhóm này");
+        }
+
+        PersonalCategory category = requireMatchingCategory(
+                request.getCategoryId(),
+                PersonalTransactionType.EXPENSE
+        );
+        Map<Long, PersonalWallet> lockedWallets = lockWallets(
+                userId,
+                existing == null ? request.getWalletId() : existing.getWallet().getId(),
+                request.getWalletId()
+        );
+        PersonalWallet requestedWallet = lockedWallets.get(request.getWalletId());
+
+        if (existing != null) {
+            boolean unchanged = existing.getAmount().compareTo(amount) == 0
+                    && existing.getWallet().getId().equals(request.getWalletId())
+                    && existing.getCategory().getId().equals(request.getCategoryId());
+            if (unchanged) return toResponse(existing);
+
+            PersonalWallet previousWallet = lockedWallets.get(existing.getWallet().getId());
+            adjustBalance(previousWallet, PersonalTransactionType.EXPENSE, existing.getAmount(), -1);
+            adjustBalance(requestedWallet, PersonalTransactionType.EXPENSE, amount, 1);
+            existing.setWallet(requestedWallet);
+            existing.setCategory(category);
+            existing.setAmount(amount);
+            existing.setTitle("Chi tiêu chuyến đi: " + currentMember.getGroup().getName());
+            existing.setNote("Tự động đồng bộ chi phí từ nhóm " + currentMember.getGroup().getName());
+            walletRepository.saveAll(lockedWallets.values());
+            return toResponse(transactionRepository.save(existing));
+        }
+
+        User user = findUser(userId);
+        PersonalTransaction transaction = PersonalTransaction.builder()
+                .user(user)
+                .wallet(requestedWallet)
+                .category(category)
+                .title("Chi tiêu chuyến đi: " + currentMember.getGroup().getName())
+                .amount(amount)
+                .type(PersonalTransactionType.EXPENSE)
+                .note("Tự động đồng bộ chi phí từ nhóm " + currentMember.getGroup().getName())
+                .sourceGroupId(groupId)
+                .transactionTime(LocalDateTime.now())
+                .build();
+
+        adjustBalance(requestedWallet, PersonalTransactionType.EXPENSE, amount, 1);
+        walletRepository.save(requestedWallet);
         return toResponse(transactionRepository.save(transaction));
     }
 
@@ -261,6 +340,7 @@ public class PersonalTransactionService {
                 .walletName(wallet.getName())
                 .note(transaction.getNote())
                 .receiptImageUrl(transaction.getReceiptImageUrl())
+                .sourceGroupId(transaction.getSourceGroupId())
                 .transactionTime(transaction.getTransactionTime())
                 .createdAt(transaction.getCreatedAt())
                 .updatedAt(transaction.getUpdatedAt())

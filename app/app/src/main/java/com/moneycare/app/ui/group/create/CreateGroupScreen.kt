@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,15 +58,17 @@ fun CreateGroupScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     
-    var groupName by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var budgetInput by remember { mutableStateOf("") }
-    var selectedMembers by remember { mutableStateOf(listOf(MemberUi("current", "Tôi", PrimaryGreen))) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showMemberPicker by remember { mutableStateOf(false) }
+    var groupName by rememberSaveable { mutableStateOf("") }
+    var description by rememberSaveable { mutableStateOf("") }
+    var budgetInput by rememberSaveable { mutableStateOf("") }
+    var selectedMembers by rememberSaveable(stateSaver = MemberUiListSaver) {
+        mutableStateOf(listOf(MemberUi("current", "Tôi", PrimaryGreen)))
+    }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showMemberPicker by rememberSaveable { mutableStateOf(false) }
 
     // State for Group Image
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedImageUri by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var selectedBase64 by remember { mutableStateOf<String?>(null) }
 
@@ -72,7 +76,16 @@ fun CreateGroupScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            selectedImageUri = uri
+            selectedImageUri = uri.toString()
+        }
+    }
+
+    LaunchedEffect(selectedImageUri) {
+        val uri = selectedImageUri?.let(Uri::parse)
+        if (uri == null) {
+            selectedBitmap = null
+            selectedBase64 = null
+        } else {
             val (bitmap, base64) = processUriToBitmapAndBase64(context, uri)
             selectedBitmap = bitmap
             selectedBase64 = base64
@@ -542,7 +555,7 @@ private fun MemberPickerBottomSheet(
     onDismiss: () -> Unit,
     onUpdate: (List<MemberUi>) -> Unit
 ) {
-    var nameInput by remember { mutableStateOf("") }
+    var nameInput by rememberSaveable { mutableStateOf("") }
     val selectedMembers = initiallySelected
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -601,6 +614,24 @@ private fun MemberPickerBottomSheet(
         }
     }
 }
+
+private val MemberUiListSaver = listSaver<List<MemberUi>, String>(
+    save = { members ->
+        members.flatMap { member ->
+            listOf(member.id, member.name, member.avatarColor.value.toString())
+        }
+    },
+    restore = { values ->
+        values.chunked(3).mapNotNull { value ->
+            if (value.size != 3) return@mapNotNull null
+            MemberUi(
+                id = value[0],
+                name = value[1],
+                avatarColor = value[2].toULongOrNull()?.let(::Color) ?: PrimaryGreen
+            )
+        }
+    }
+)
 
 @Composable
 private fun FieldLabel(text: String) {

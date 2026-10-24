@@ -5,11 +5,13 @@ import com.dev.expensemanagement.entity.GroupExpense;
 import com.dev.expensemanagement.entity.GroupExpenseSplit;
 import com.dev.expensemanagement.entity.GroupMember;
 import com.dev.expensemanagement.entity.GroupTask;
+import com.dev.expensemanagement.entity.GroupSettlement;
 import com.dev.expensemanagement.repository.ExpenseGroupRepository;
 import com.dev.expensemanagement.repository.GroupExpenseRepository;
 import com.dev.expensemanagement.repository.GroupExpenseSplitRepository;
 import com.dev.expensemanagement.repository.GroupMemberRepository;
 import com.dev.expensemanagement.repository.GroupTaskRepository;
+import com.dev.expensemanagement.repository.GroupSettlementRepository;
 import com.dev.expensemanagement.security.GroupAuthorizationService;
 import org.junit.jupiter.api.Test;
 
@@ -30,10 +32,11 @@ class GroupReportServiceTest {
         GroupExpenseRepository expenseRepository = mock(GroupExpenseRepository.class);
         GroupExpenseSplitRepository splitRepository = mock(GroupExpenseSplitRepository.class);
         GroupTaskRepository taskRepository = mock(GroupTaskRepository.class);
+        GroupSettlementRepository settlementRepository = mock(GroupSettlementRepository.class);
         GroupAuthorizationService authorizationService = mock(GroupAuthorizationService.class);
         GroupReportService service = new GroupReportService(
                 groupRepository, memberRepository, expenseRepository, splitRepository,
-                taskRepository, authorizationService
+                taskRepository, settlementRepository, authorizationService
         );
 
         ExpenseGroup group = ExpenseGroup.builder().id(1L).name("Trip").budget(BigDecimal.valueOf(500)).build();
@@ -54,16 +57,25 @@ class GroupReportServiceTest {
                 GroupTask.builder().isCompleted(true).build(),
                 GroupTask.builder().isCompleted(false).build()
         ));
+        when(settlementRepository.findByGroup_IdOrderBySettledAtDesc(1L)).thenReturn(List.of(
+                GroupSettlement.builder()
+                        .id(30L)
+                        .group(group)
+                        .fromMember(binh)
+                        .toMember(an)
+                        .amount(BigDecimal.valueOf(50))
+                        .build()
+        ));
 
         var report = service.getReport(1L, 99L);
 
         verify(authorizationService).requireMember(1L, 99L);
         assertEquals(BigDecimal.valueOf(300), report.getTotalExpense());
-        assertEquals(BigDecimal.valueOf(100), report.getSettledAmount());
-        assertEquals(BigDecimal.valueOf(200), report.getOutstandingAmount());
+        assertEquals(BigDecimal.valueOf(50), report.getSettledAmount());
+        assertEquals(BigDecimal.valueOf(150), report.getOutstandingAmount());
         assertEquals(1, report.getExpenseCount());
         assertEquals(1, report.getCompletedTaskCount());
-        assertEquals(BigDecimal.valueOf(200), report.getMembers().get(0).getNetBalance());
-        assertEquals(BigDecimal.valueOf(-200), report.getMembers().get(1).getNetBalance());
+        assertEquals(BigDecimal.valueOf(150), report.getMembers().get(0).getNetBalance());
+        assertEquals(BigDecimal.valueOf(-150), report.getMembers().get(1).getNetBalance());
     }
 }

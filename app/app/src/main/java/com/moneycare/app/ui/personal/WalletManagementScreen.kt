@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.moneycare.app.data.model.personal.WalletResponse
 import com.moneycare.app.ui.components.GroupDetailTopBar
+import com.moneycare.app.ui.components.ErrorRetryContent
+import com.moneycare.app.ui.state.LoadState
 import com.moneycare.app.util.formatVnd
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,13 +68,15 @@ fun WalletManagementScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    var editingWallet by remember { mutableStateOf<WalletResponse?>(null) }
-    var showWalletForm by remember { mutableStateOf(false) }
-    var deletingWallet by remember { mutableStateOf<WalletResponse?>(null) }
+    var editingWalletId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showWalletForm by rememberSaveable { mutableStateOf(false) }
+    var deletingWalletId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editingWallet = state.wallets.firstOrNull { it.walletId == editingWalletId }
+    val deletingWallet = state.wallets.firstOrNull { it.walletId == deletingWalletId }
 
     LaunchedEffect(Unit) { viewModel.loadWallets() }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.wallets.isNotEmpty()) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -92,17 +97,17 @@ fun WalletManagementScreen(
 
     deletingWallet?.let { wallet ->
         AlertDialog(
-            onDismissRequest = { deletingWallet = null },
+            onDismissRequest = { deletingWalletId = null },
             title = { Text("Xóa ví?") },
             text = { Text("Ví “${wallet.name}” chỉ có thể xóa khi chưa có giao dịch.") },
             confirmButton = {
                 TextButton(
-                    onClick = { viewModel.deleteWallet(wallet) { deletingWallet = null } },
+                    onClick = { viewModel.deleteWallet(wallet) { deletingWalletId = null } },
                     enabled = !state.isSaving
                 ) { Text("Xóa", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deletingWallet = null }) { Text("Hủy") }
+                TextButton(onClick = { deletingWalletId = null }) { Text("Hủy") }
             }
         )
     }
@@ -113,7 +118,7 @@ fun WalletManagementScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    editingWallet = null
+                    editingWalletId = null
                     showWalletForm = true
                 }
             ) {
@@ -121,18 +126,24 @@ fun WalletManagementScreen(
             }
         }
     ) { padding ->
-        when {
-            state.isLoading && state.wallets.isEmpty() -> Box(
+        when (val content = state.contentState) {
+            LoadState.Loading -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            state.wallets.isEmpty() -> Box(
+            is LoadState.Error -> ErrorRetryContent(
+                message = content.message,
+                onRetry = viewModel::loadWallets,
+                modifier = Modifier.padding(padding)
+            )
+
+            LoadState.Empty -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
                 contentAlignment = Alignment.Center
             ) { Text("Chưa có ví. Nhấn + để tạo ví đầu tiên.") }
 
-            else -> LazyColumn(
+            is LoadState.Success -> LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -142,11 +153,11 @@ fun WalletManagementScreen(
                         wallet = wallet,
                         actionsEnabled = !state.isSaving,
                         onEdit = {
-                            editingWallet = wallet
+                            editingWalletId = wallet.walletId
                             showWalletForm = true
                         },
                         onMakeDefault = { viewModel.makeDefault(wallet) },
-                        onDelete = { deletingWallet = wallet }
+                        onDelete = { deletingWalletId = wallet.walletId }
                     )
                 }
             }
@@ -309,8 +320,10 @@ private fun WalletFormDialog(
     onDismiss: () -> Unit,
     onSave: (String, Boolean) -> Unit
 ) {
-    var name by remember(wallet?.walletId) { mutableStateOf(wallet?.name.orEmpty()) }
-    var makeDefault by remember(wallet?.walletId) { mutableStateOf(wallet?.isDefault ?: false) }
+    var name by rememberSaveable(wallet?.walletId) { mutableStateOf(wallet?.name.orEmpty()) }
+    var makeDefault by rememberSaveable(wallet?.walletId) {
+        mutableStateOf(wallet?.isDefault ?: false)
+    }
     val validName = name.trim().isNotEmpty() && name.trim().length <= 100
 
     AlertDialog(

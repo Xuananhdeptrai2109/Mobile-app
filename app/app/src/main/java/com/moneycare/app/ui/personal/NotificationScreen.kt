@@ -38,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.moneycare.app.data.model.personal.NotificationResponse
+import com.moneycare.app.ui.components.ErrorRetryContent
+import com.moneycare.app.ui.state.LoadState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,7 +52,7 @@ fun NotificationScreen(
 
     LaunchedEffect(Unit) { viewModel.loadNotifications() }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.notifications.isNotEmpty()) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -74,18 +76,24 @@ fun NotificationScreen(
             )
         }
     ) { padding ->
-        when {
-            state.isLoading && state.notifications.isEmpty() -> Box(
+        when (val content = state.contentState) {
+            LoadState.Loading -> Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            state.notifications.isEmpty() -> Box(
+            is LoadState.Error -> ErrorRetryContent(
+                message = content.message,
+                onRetry = viewModel::loadNotifications,
+                modifier = Modifier.padding(padding)
+            )
+
+            LoadState.Empty -> Box(
                 Modifier.fillMaxSize().padding(padding).padding(24.dp),
                 contentAlignment = Alignment.Center
             ) { Text("Bạn chưa có thông báo nào.") }
 
-            else -> LazyColumn(
+            is LoadState.Success -> LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)

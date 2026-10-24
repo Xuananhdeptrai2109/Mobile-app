@@ -45,6 +45,9 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val hasLoadedContent = uiState.recentTransactions.isNotEmpty() ||
+        uiState.savingsGoals.isNotEmpty() || uiState.groups.isNotEmpty() ||
+        uiState.groupTasks.isNotEmpty()
     val userName = remember {
         try {
             MoneyCareApp.instance.sessionManager.getUserName() ?: "Người dùng"
@@ -58,7 +61,7 @@ fun HomeScreen(
     }
 
     androidx.compose.runtime.LaunchedEffect(uiState.errorMessage) {
-        uiState.errorMessage?.let { message ->
+        if (hasLoadedContent) uiState.errorMessage?.let { message ->
             snackbarHostState.showSnackbar(message)
             viewModel.clearError()
         }
@@ -104,7 +107,12 @@ fun HomeScreen(
                 onModeSelected = viewModel::selectMode
             )
 
-            if (uiState.isLoading) {
+            if (uiState.errorMessage != null && !hasLoadedContent) {
+                ErrorRetryContent(
+                    message = uiState.errorMessage ?: "Không thể tải dữ liệu",
+                    onRetry = viewModel::loadHomeData
+                )
+            } else if (uiState.isLoading) {
                 LoadingAnimation()
             } else {
                 AnimatedContent(

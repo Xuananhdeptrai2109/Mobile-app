@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -13,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.moneycare.app.data.model.personal.CategoryStatisticResponse
 import com.moneycare.app.ui.components.*
+import com.moneycare.app.ui.state.LoadState
 import com.moneycare.app.ui.theme.*
 import java.text.NumberFormat
 import java.util.Locale
@@ -28,11 +30,11 @@ fun StatisticsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    var showBudgetDialog by remember { mutableStateOf(false) }
+    var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.loadStatistics() }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
+        if (state.statistics != null) state.errorMessage?.let {
             snackbar.showSnackbar(it)
             viewModel.clearError()
         }
@@ -68,14 +70,26 @@ fun StatisticsScreen(
             )
         }
     ) { padding ->
-        when {
-            state.isLoading && state.statistics == null -> Box(
+        when (val content = state.statisticsContentState) {
+            LoadState.Loading -> Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            state.statistics != null -> {
-                val statistics = state.statistics!!
+            is LoadState.Error -> ErrorRetryContent(
+                message = content.message,
+                onRetry = viewModel::loadStatistics,
+                modifier = Modifier.padding(padding)
+            )
+
+            LoadState.Empty -> ErrorRetryContent(
+                message = "Chưa có dữ liệu thống kê",
+                onRetry = viewModel::loadStatistics,
+                modifier = Modifier.padding(padding)
+            )
+
+            is LoadState.Success -> {
+                val statistics = content.data
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(bottom = 24.dp)
@@ -241,7 +255,7 @@ private fun BudgetDialog(
     onSave: (Long) -> Unit,
     onDelete: (() -> Unit)?
 ) {
-    var amount by remember(initialAmount) { mutableLongStateOf(initialAmount) }
+    var amount by rememberSaveable(initialAmount) { mutableLongStateOf(initialAmount) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ngân sách tháng") },

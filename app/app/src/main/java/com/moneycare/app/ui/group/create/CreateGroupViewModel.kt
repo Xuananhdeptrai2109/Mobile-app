@@ -3,6 +3,7 @@ package com.moneycare.app.ui.group.create
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.graphics.Color
+import com.moneycare.app.MoneyCareApp
 import com.moneycare.app.data.repository.RealGroupRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +24,7 @@ data class MemberUi(
 )
 
 class CreateGroupViewModel(
-    private val repository: RealGroupRepository = RealGroupRepository()
+    private val repository: RealGroupRepository = MoneyCareApp.instance.container.groupRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CreateGroupUiState())
